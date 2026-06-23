@@ -261,6 +261,25 @@ that are live-stream drafts specifically.
 **Important:** Unlike `/published`, `order_by` only accepts `draft_updated_at`
 (NOT `post_date`). Returns same `{posts, offset, limit, total, isCapped}` shape.
 
+### ✅ `GET /api/v1/post/{post_id}/theme`
+**Host:** `{subdomain}.substack.com`
+**Returns:** The post-level theme override (per-post styling). Empty/null
+when the post uses the publication default. Used by the editor to
+restore custom per-post styling.
+
+### ✅ `GET /api/v1/video/linkedin/{post_id}/auto-upload-state`
+**Host:** `{subdomain}.substack.com`
+**Returns:** LinkedIn auto-cross-post state for the given post (queued,
+uploading, uploaded, error). Sibling of the YouTube authorization
+endpoints in the Cross-posting section.
+
+### ✅ `PUT /api/v1/user/writer_referrals/code`
+**Host:** `{subdomain}.substack.com`
+**Returns:** The writer's referral code object. Idempotent — calling
+it creates a code on first invocation, returns the existing one
+thereafter. Used by the post editor on first load to make sure a
+referral code exists before rendering referral UI.
+
 ### ✅ `GET /api/v1/posts/by-id/{post_id}`
 **Host:** `{subdomain}.substack.com` (use the pub's actual host — custom
 domain or `{sub}.substack.com`)
@@ -449,6 +468,9 @@ to, sorted reverse-chronologically. The "Reader feed" is the Notes home
 
 ### ✅ `GET /api/v1/inbox/top`
 **Host:** `substack.com`
+**Query (verified from web capture):** `inboxType=inbox`, `surface=inbox_all`,
+`limit=20`. Other `surface` values likely mirror the inbox filter tabs
+(`inbox_listen`, `inbox_paid`, `inbox_saved`, `inbox_history`).
 **Returns:** `{ posts: [...] }` — the user's inbox: posts from subscribed
 publications. Each post item has full post shape (id, title, slug,
 publication_id, etc.).
@@ -650,9 +672,43 @@ browser-style headers including `Sec-Fetch-*`, `Referer`, `Origin`.
 
 ### ✅ `GET /api/v1/recommendations/from/{publication_id}`
 **Host:** `{subdomain}.substack.com` (the recommending pub's host)
+**Optional query:** `offset`, `limit`, `paginate=true` (the web UI passes
+`offset=0&limit=50&paginate=true`).
 **Returns:** `[ <recommendation> ]` array. Empty `[]` if no recommendations
 set. `publication_id` is the recommender's id (from `/user/profile/self`
 or `/publication`).
+
+### ✅ `GET /api/v1/recommendations/exist`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Cheap "do recommendations exist for this pub?" probe — used
+by the SPA to decide whether to show the recommendations UI.
+
+### ✅ `GET /api/v1/recommendations/{publication_id}/suggested`
+**Host:** `{subdomain}.substack.com`
+**Returns:** ML-suggested publications to recommend, based on overlap
+with the pub's subscribers. Used to populate the "Add recommendation"
+modal.
+
+### ✅ `GET /api/v1/recommendations/from/{from_pub_id}/to/{to_pub_id}`
+**Host:** `{from_pub_id}.substack.com`
+**Returns:** Existence + metadata for a specific recommendation edge.
+Used by the "Add recommendation" modal to gate the Add button (so you
+can't double-add).
+
+### ✅ `GET /api/v1/recommendations/stats/to`
+**Host:** `{subdomain}.substack.com`
+**Required query:** `offset`, `limit`, `order_by` (e.g. `xp_signups`),
+`order_direction` (`desc`/`asc`).
+**Returns:** Incoming recommendations TO this pub with subscriber-acquisition
+stats. Used for the "Incoming recommendations" table in the dashboard
+("Substack X sent you Y subs from their recommendation").
+
+### ✅ `GET /api/v1/publication/search`
+**Host:** `{subdomain}.substack.com`
+**Required query:** `query` (search string), `page` (zero-indexed).
+**Returns:** Paginated list of publication objects matching the search.
+Used by the "Add recommendation" search box. Each result has at minimum
+`id`, `name`, `subdomain`, `logo_url`, `custom_domain`.
 
 ### 🔒 `GET /api/v1/publication/recommendations`
 **Host:** `substack.com`
@@ -897,6 +953,27 @@ Per-user paid-pledge breakdown.
 **Host:** `{subdomain}.substack.com`
 **Returns:** Permission flag for deleting archived stats. Admin-only.
 
+### ✅ `GET /api/v1/publication/stats/growth/sources`
+**Host:** `{subdomain}.substack.com`
+**Required query:** `from_date=YYYY-MM-DD`, `to_date=YYYY-MM-DD`,
+`order_by` (e.g. `users`), `order_direction` (`desc`/`asc`).
+**Returns:** Subscriber/visitor source breakdown for the date window —
+the "Growth sources" table in the writer dashboard. Used to attribute
+new subs to channels (Notes, recommendations, direct, etc.).
+
+### ✅ `GET /api/v1/publication/stats/growth/events`
+**Host:** `{subdomain}.substack.com`
+**Required query:** `from_date=YYYY-MM-DD`, `to_date=YYYY-MM-DD`.
+**Returns:** Growth events timeline — discrete events that drove
+subscriber inflow (new post sent, viral note, recommendation switched on,
+etc.). Used to annotate the growth chart.
+
+### ✅ `POST /api/v1/publication/stats/growth/partial-timeseries`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Partial chart series updates. The web app fires this when
+the user pans/zooms the growth chart. Body shape not yet enumerated;
+probably `{from_date, to_date, granularity, metric}`. PR welcome.
+
 ### ✅ `GET /api/v1/publish-dashboard/summary-v2?range={N}`
 **Host:** `{subdomain}.substack.com`
 **Query:** `range` accepts integer day counts. Verified: `7`, `30`, `365`.
@@ -951,12 +1028,55 @@ Use as the read-side companion to `PUT /publication` (settings update).
 
 ### ✅ `PUT /api/v1/publication`
 **Host:** `{subdomain}.substack.com`
-**Body:** A partial publication object. With an empty body you get
-`{"error":"No valid publication parameters provided"}` — confirming the
-endpoint exists. Field allowlist not yet fully enumerated; known-good
-fields based on the `GET` response shape include `name`, `logo_url`,
-`hero_text`, `description`. PRs welcome to expand this with confirmed
-writable fields.
+**Body:** A single-field partial publication object. The web UI saves
+**one field per call** — clicking "Save" on a specific field sends only
+that field, not the whole object.
+```json
+{ "hero_text": "Notes on life, love & leadership." }
+```
+**Confirmed writable fields** (captured by patching `window.fetch` in the
+settings UI and toggling fields):
+- `name` — string (publication name)
+- `hero_text` — string (publication short description)
+- `language` — string (ISO 639-1 code; `en`, `es`, etc. — Substack
+  reloads the UI immediately to render in the new language)
+
+With empty body returns `{"error":"No valid publication parameters provided"}`.
+
+Other fields likely accepted (from the `GET /publication` response shape):
+`logo_url`, `custom_domain`, `is_personal_mode`, and several theme/color
+fields. PRs welcome to upgrade these to ✅ Confirmed.
+
+### ✅ `GET /api/v1/publication_settings`
+**Host:** `{subdomain}.substack.com`
+**Returns:** The publication's settings — a flat key/value map of boolean
+toggles and a few non-boolean values. Separate from the publication
+object itself (which holds name/logo/etc.).
+
+### ✅ `PUT /api/v1/publication_settings`
+**Host:** `{subdomain}.substack.com`
+**Body:** Single-field partial settings object. The web UI fires this
+the moment you toggle a switch.
+```json
+{ "high_res_recording_beta": true }
+```
+**Confirmed writable fields:**
+- `high_res_recording_beta` — boolean (live-video high-resolution toggle)
+
+Many other toggles exist in the settings UI: subscribe prompts on post
+page, enable auto-clips, archive nav visibility, about-page visibility,
+notes-tab visibility, email-confirmation requirement, comments/likes/
+restacks toggle, automatic moderation, restack visibility, subscriber
+chat, live video replays, private mode, allow cross-posting, allow
+listing on Substack.com, AI training opt-out, hide stats, show
+approximate subscriber count. Each fires `PUT /publication_settings`
+with `{field: bool}`. Field names match the form field names — visible
+in the DOM if you inspect the toggle's underlying input.
+
+### ✅ `GET /api/v1/publication/verify_status`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Publication-verification status (Substack's blue-check
+equivalent). Fired on the dashboard.
 
 ### ✅ `GET /api/v1/publication/logo`
 **Host:** `{subdomain}.substack.com`
@@ -1288,6 +1408,23 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
 - **Mobile push token registration** — not mapped.
 
 ### Recently solved (kept as breadcrumbs)
+- **Round 12 (Chrome-extension live capture, 2026-06-23)** — drove the
+  user's real Chromium via the Claude Code Chrome integration, monkey-
+  patched `window.fetch` and `XMLHttpRequest.send` from a `localStorage`-
+  backed log (so captures survived page reloads), and toggled real
+  settings/fields to read the actual write-side request bodies. Key
+  wins: `PUT /publication` body shape (single field per save:
+  `{hero_text}`, `{language: "en"}`, `{name}`), discovery of the
+  separate `PUT /publication_settings` endpoint for boolean toggles
+  (`{high_res_recording_beta: true}`), the full recommendations surface
+  (`/recommendations/exist`, `/recommendations/{pub}/suggested`,
+  `/recommendations/from/{from}/to/{to}`, `/recommendations/stats/to`),
+  publication search (`/publication/search?query=...&page=N`), growth
+  analytics (`/publication/stats/growth/{sources,events,partial-timeseries}`),
+  editor-side endpoints (`/post/{id}/theme`,
+  `/video/linkedin/{post_id}/auto-upload-state`,
+  `/user/writer_referrals/code`, `/publication/verify_status`), and the
+  full `inbox/top` query-param set.
 - **Round 10 + 11 (Playwright capture sweep, 2026-06-23)** — drove a
   headless Chromium with the writer cookie through the admin SPA
   (publish dashboard, settings sub-pages, Notes home, search). Picked

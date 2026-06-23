@@ -81,7 +81,9 @@ This reference covers the endpoints needed for:
   global search
 - ✅ Reactions catalog, comment moderation enum, per-post mute settings
 - ✅ Image upload
-- ✅ Publication CRUD (create is captcha-gated; read + update work)
+- ✅ Publication CRUD: read, update (single field per `PUT`), captcha-gated create
+- ✅ Publication settings (`/publication_settings`): boolean toggle read/write
+- ✅ Recommendations (full surface): list, suggested, edge check, stats, search
 - 🟡 Cross-posting auth (YouTube / LinkedIn) — read endpoints mapped
 - 🟡 Live streams — read endpoints + eligible hosts
 - ❓ Audio / video / podcast upload (likely S3-presigned)
