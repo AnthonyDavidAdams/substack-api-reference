@@ -76,6 +76,49 @@ see, paginated.
 **Returns:** All publication categories (Culture, Tech, etc.). Public — no auth
 needed.
 
+### ✅ `GET /api/v1/user/{user_id}-{handle}/public_profile/self`
+**Host:** `substack.com`
+**Returns:** Your public profile data — the read-side companion to whatever
+the writer's profile page shows. Path is the **slug form**:
+`{numeric_user_id}-{handle}`, e.g. `/api/v1/user/12012312-anthonydavidadams/public_profile/self`.
+
+### ✅ `GET /api/v1/blocks/ids`
+**Host:** `substack.com`
+**Returns:** Flat array of `user_id`s the cookie holder has blocked.
+
+### ✅ `GET /api/v1/activity/unread`
+**Host:** `substack.com` or `{subdomain}.substack.com`
+**Returns:** `{ count, max, lastViewedAt }`. The activity feed unread-count.
+`max` is a boolean — when true the count is capped (display "99+" instead of
+the exact number).
+
+### ✅ `GET /api/v1/realtime/token`
+**Host:** `substack.com` or `{subdomain}.substack.com`
+**Returns:** `{ token: "<JWT>" }`. The JWT (`aud: zync`, includes a permissions
+array and short TTL ~1h) authenticates websocket subscriptions to Substack's
+realtime service for things like Notes refresh + chat. The token is signed
+with Substack's prod issuer key. The web app refreshes it about every 60s.
+
+---
+
+## Auth & login
+
+### ✅ `POST /api/v1/login`
+**Host:** `substack.com`
+**Body:** `{ email, password }`. Legacy email+password login path. Returns 400
+with `errors: [{param: "email"|"password"}]` when fields are missing.
+
+### ✅ `POST /api/v1/email-login`
+**Host:** `substack.com`
+**Body:** `{ email }`. Sends a magic-link email. Returns 400 with
+`errors: [{param: "email"}]` when missing. This is the modern passwordless
+login flow.
+
+### ❓ Magic-link verify endpoint
+The link in the email points to `https://substack.com/sign-in?token=<jwt>`,
+which appears to be handled by a server-side route rather than `/api/v1/*`.
+The session cookie is set by that handler. Not currently mapped.
+
 ---
 
 ## Drafts (publication-scoped)
@@ -184,6 +227,32 @@ for browsing.
 (`post_date`), `order_direction` (`desc`/`asc`).
 **Returns:** `{ posts, offset, limit, total, isCapped }`. Admin view with
 engagement context.
+
+### ✅ `GET /api/v1/post_management/drafts`
+**Host:** `{subdomain}.substack.com`
+**Required query:** `offset`, `limit`, `order_by`, `order_direction`.
+`order_by` accepts `draft_updated_at`. Returns the standard
+`{posts, offset, limit, total, isCapped}` shape — but the items are drafts,
+not published posts. Use as a paginated drafts list (alternative to
+`GET /drafts?limit=N` which doesn't paginate cleanly).
+
+### ✅ `GET /api/v1/post_management/counts`
+**Host:** `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "published": 40, "publishedIsCapped": false,
+  "drafts": 16,    "draftsIsCapped": false,
+  "scheduled": 0,  "scheduledIsCapped": false
+}
+```
+Single-call dashboard counts. Useful for "where do I have work" probes
+without hitting each of `/published`, `/drafts`, `/scheduled` separately.
+
+### ✅ `GET /api/v1/post_management/live_stream_drafts`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Same shape as other `post_management/*` list endpoints. Drafts
+that are live-stream drafts specifically.
 
 ### ✅ `GET /api/v1/post_management/scheduled`
 **Host:** `{subdomain}.substack.com`
@@ -335,6 +404,376 @@ count — useful even when you only need the number.
 filter objects in the body. Same pattern as other "search with filters"
 endpoints in the surface.
 
+### ✅ `POST /api/v1/subscriber/add`
+**Host:** `{subdomain}.substack.com`
+**Body:** Empty body returns `{}` (200) — endpoint exists and accepts the
+call but the no-op suggests it silently ignores empty input. The web UI's
+"Add subscriber" form sends `{ email, name? }`. Use with care: this adds a
+real subscriber to your publication.
+
+### ✅ `DELETE /api/v1/subscriber/{subscription_id}`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `400 { error: "Subscription not found" }` for an unknown id,
+which confirms the path exists. `subscription_id` is the `subscription_id`
+field from `POST /subscriber-stats`. Removes a subscriber from the
+publication.
+
+### ✅ `GET /api/v1/import`
+**Host:** `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "total": 0,
+  "is_added": 0,
+  "is_skipped": 0,
+  "is_limited": 0,
+  "passImportVerification": true
+}
+```
+Subscriber-import job status (CSV uploads from the UI). `passImportVerification`
+gates whether you can run another import — Substack throttles new pubs.
+
+### ✅ `GET /api/v1/subscriptions/page_v2`
+**Host:** `substack.com` or `{subdomain}.substack.com`
+**Returns:** Paginated `/api/v1/subscriptions` data (publications the user
+is subscribed to). Use the `_v2` form for new code — the non-versioned
+endpoint is still around but the web app has moved on.
+
+---
+
+## Inbox & reader feed
+
+The "Inbox" is the reader's home — posts from publications they subscribe
+to, sorted reverse-chronologically. The "Reader feed" is the Notes home
+(For You / Subscribed / etc. tabs).
+
+### ✅ `GET /api/v1/inbox/top`
+**Host:** `substack.com`
+**Returns:** `{ posts: [...] }` — the user's inbox: posts from subscribed
+publications. Each post item has full post shape (id, title, slug,
+publication_id, etc.).
+
+### ✅ `POST /api/v1/inbox/seen`
+**Host:** `substack.com`
+**Body:** empty.
+**Returns:** `{ ok: true }`. Marks all inbox items as seen.
+
+### ✅ `GET /api/v1/reader/feed/tabs`
+**Host:** `substack.com`
+**Returns:**
+```json
+{
+  "tabs": [
+    { "id": "for-you",    "name": "For you",   "type": "base",      "layout": "post_queue_head",      "trackingParameters": {...} },
+    { "id": "subscribed", "name": "Following", "type": "secondary", "layout": "...", ... },
+    ...
+  ]
+}
+```
+The list of tabs in the Notes home feed. `layout` controls the rendering
+style of items in that tab.
+
+### ✅ `GET /api/v1/reader/feed/c-{comment_id}` and `/p-{post_id}`
+**Host:** `substack.com`
+The `entity_key` prefix (`c-` for notes/comments, `p-` for posts) routes
+to the right item shape. Used by the SPA when expanding a single feed
+item into a detail view.
+
+### ✅ `POST /api/v1/reader/feed/{entity_key}/seen`
+*(Already documented in Notes section above — same shape; works for any
+feed item entity_key.)*
+
+---
+
+## Search
+
+### ✅ `GET /api/v1/search/explore/web?query=...`
+**Host:** `substack.com`
+**Returns:** Global search results across publications, posts, and Notes.
+
+### ✅ `GET /api/v1/search-modules`
+**Host:** `substack.com`
+**Returns:** `{ modules: [...] }` — content modules to populate the
+search-page surface before the user types anything: trending topics
+(`type: "trending_topics"` with `suggestedSearches`), trending posts per
+category (`type: "trending", name: "Business" | "Tech" | ...`), etc.
+Useful for clients that want to build a discovery surface.
+
+---
+
+## Notifications & moderation
+
+### ✅ `GET /api/v1/notification_settings/post/{post_id}/mute`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Mute state for a specific post — whether the cookie holder
+has muted notifications for replies/reactions on that post. Per-post,
+not per-publication.
+
+### ✅ `GET /api/v1/comment/moderation/delete_reasons`
+**Host:** `substack.com`
+**Returns:**
+```json
+{
+  "reasons": [
+    { "id": "violated_reply_rules", "label": "Violated reply rules" },
+    { "id": "slop",                 "label": "Slop" },
+    { "id": "clickbait",            "label": "Clickbait" },
+    { "id": "spam",                 "label": "Spam" },
+    { "id": "shilling",             "label": "Shilling" },
+    { "id": "political",            "label": "..." },
+    ...
+  ]
+}
+```
+The enum of moderator-delete reasons. Use when calling the (not yet
+mapped) `POST /comment/moderation/delete` endpoint, which the writer
+admin UI fires when removing a reader comment.
+
+### ✅ `GET /api/v1/threads/reactions`
+**Host:** `substack.com`
+**Returns:**
+```json
+{
+  "suggestedReactionTypes": ["thumbs_up", "upvote", "face_with_tears_of_joy", "double_exclamation_mark"],
+  "categories": [
+    { "title": "Frequently used", "reactionTypes": ["broken_heart", "thinking_face", ...] },
+    ...
+  ]
+}
+```
+Catalog of reaction emojis available on Notes/comments. The reaction
+**name** strings (e.g. `thumbs_up`) are used as the payload when posting
+a reaction (POST endpoint not yet mapped).
+
+---
+
+## Subscriptions (reader-side, account-scoped)
+
+These are subscriptions the cookie holder has TO other publications
+(different from `POST /subscriber-stats` which lists subscribers OF a
+publication you own).
+
+### ✅ `GET /api/v1/subscriptions/page_v2`
+**Host:** `substack.com` or `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "subscriptions": [
+    {
+      "id": 215478136,
+      "user_id": 12012312,
+      "publication_id": 1,
+      "expiry": null,
+      "bundle_id": null,
+      "email_disabled": true,
+      "membership_state": "free_signup",
+      "type": null,
+      ...
+    }
+  ]
+}
+```
+Paginated list of the user's subscriptions. `membership_state` values
+include `free_signup`, `subscribed`, etc.
+
+### ✅ `GET /api/v1/subscriptions/top/v2`
+**Host:** `substack.com`
+**Returns:** `{ items: [{ id, pub: {author_id, author_name, ...}, ... }] }` —
+the user's "top" (most-engaged-with) subscriptions, used for discovery
+surfaces in the Substack app.
+
+### ✅ `GET /api/v1/subscription`
+**Host:** `{subdomain}.substack.com`
+**Returns:** The cookie holder's subscription to **this specific pub**
+(if any). Useful for "am I subscribed to X?" checks without iterating
+the full subscriptions list.
+
+### ✅ `GET /api/v1/archive`
+**Host:** `{subdomain}.substack.com`
+**Returns:** The publication's archive — all published posts,
+typically used to render the `/archive` reader page. Same data is
+available via `/posts?limit=N` with pagination — `/archive` is the
+unpaginated full-list variant.
+
+---
+
+## Reader comments (on posts)
+
+Reader comments are distinct from Notes despite both using the `/comment`
+namespace. These are the comments that appear under a published post.
+
+### ✅ `GET /api/v1/post/{post_id}/comments`
+**Host:** `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "comments": [
+    {
+      "id": 281390316,
+      "user_id": 12012312,
+      "body": "...",
+      "body_json": { /* ProseMirror tree */ },
+      ...
+    }
+  ],
+  "automod_hidden_comments": []
+}
+```
+Use the `post_id` integer (not slug). Comments authored by users who got
+auto-flagged appear under `automod_hidden_comments`.
+
+### ✅ `POST /api/v1/post/{post_id}/comment`
+**Host:** `{subdomain}.substack.com`
+**Body:** `{ "body": "comment text" }` — minimum required.
+**Returns:** The created comment with `id`, `user_id`, `body`, `body_json`
+(parsed ProseMirror tree). Substack auto-converts plain `body` text into
+the canonical ProseMirror shape.
+
+Empty body returns `400 { error: "Please type in a comment" }`.
+
+### ✅ `DELETE /api/v1/comment/{comment_id}`
+**Host:** `{subdomain}.substack.com` works too (not just `substack.com` —
+the Notes section already documented this path on the account host).
+**Returns:** `200 {}` on success. Same endpoint deletes both reader
+comments and Notes.
+
+---
+
+## Recommendations (cross-publication promotion)
+
+The "Recommendations" feature lets publications recommend each other to
+their subscribers. Important: these endpoints **403 from a plain curl
+session** but **200 from a real browser session**, even with the same
+cookie. The difference appears to be either a header sent by the SPA or
+referer-based gating. If you need to hit them headlessly, send full
+browser-style headers including `Sec-Fetch-*`, `Referer`, `Origin`.
+
+### ✅ `GET /api/v1/recommendations/from/{publication_id}`
+**Host:** `{subdomain}.substack.com` (the recommending pub's host)
+**Returns:** `[ <recommendation> ]` array. Empty `[]` if no recommendations
+set. `publication_id` is the recommender's id (from `/user/profile/self`
+or `/publication`).
+
+### 🔒 `GET /api/v1/publication/recommendations`
+**Host:** `substack.com`
+**Returns:** 403 from curl, observed in browser captures. Likely the
+"recommendations involving you" cross-cut view.
+
+### ❓ Add / remove a recommendation
+The web UI's "Add recommendation" → publication-typeahead → submit
+fires a `POST` we haven't captured yet. Likely shape:
+`POST /recommendations` with `{ publication_id, note? }`. PR welcome.
+
+---
+
+## Messages & DMs
+
+Substack has writer-to-writer DMs (separate from Notes and from publication
+chat).
+
+### ✅ `GET /api/v1/messages/inbox`
+**Host:** `substack.com`
+**Returns:** Inbox of DMs.
+
+### ✅ `GET /api/v1/messages/unread-count`
+**Host:** `substack.com` or `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "unreadCount": 0,
+  "pendingInviteCount": 0,
+  "pendingInviteUnreadCount": 0,
+  "newPendingInviteUnreadCount": 0,
+  "pubChatUnreadCount": 0
+}
+```
+Combined badge counts: DMs (`unreadCount`), pending DM-invites
+(`pendingInvite*`), and publication chat (`pubChatUnreadCount`).
+
+### ❓ Sending a DM
+Not yet mapped. Likely `POST /messages` with `{recipient_user_id, body}`.
+
+---
+
+## Paid subscriptions & Stripe
+
+### ✅ `GET /api/v1/stripe/account`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ account, plans }`. Both `null` when Stripe isn't connected
+yet. When connected, returns Stripe Connect account info and any configured
+plans.
+
+### ✅ `GET /api/v1/pledges/plans`
+**Host:** `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "enabled": true,
+  "payment_pledge_plans": [
+    { "name": "Yearly",   "amount": 5000, "interval": "year",  "currency": "usd" },
+    { "name": "Monthly",  "amount": 500,  "interval": "month", "currency": "usd" },
+    { "name": "Founding", "amount": ..., ... }
+  ]
+}
+```
+The publication's configured pledge/subscription tier list. Amounts are
+in cents. `enabled` indicates the pub has paid subscriptions configured
+(even if Stripe isn't fully connected).
+
+### ✅ `GET /api/v1/pledges/plans/summary`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Summary stats for the pledge plans.
+
+---
+
+## Cross-posting (YouTube, LinkedIn)
+
+Substack supports cross-posting video to YouTube and LinkedIn.
+
+### ✅ `GET /api/v1/video/youtube/check-authorization`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Auth status for YouTube cross-post. Whether the writer has
+linked a YouTube channel.
+
+### ✅ `GET /api/v1/video/youtube/show-banner`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Whether to show the "connect YouTube" banner in the editor.
+
+### ✅ `GET /api/v1/video/linkedin/check-authorization`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Auth status for LinkedIn cross-post.
+
+---
+
+## Growth helpers
+
+### ✅ `GET /api/v1/grow/suggestion`
+**Host:** `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "suggestion": {
+    "header": "Engage in comments",
+    "body": "...",
+    ...
+  }
+}
+```
+Server-side "grow your publication" tips. Rotates over time. Used to
+populate the dashboard's growth card.
+
+---
+
+## Telemetry
+
+### ✅ `POST /api/v1/firehose/batch`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `204` (no body). Substack's client-side analytics batch
+endpoint. The web app fires this constantly with page-view and interaction
+events. Documenting only so people who notice it in their captures
+understand what it is. **Not useful for clients** — don't call it
+manually.
+
 ---
 
 ## Stats & analytics
@@ -419,6 +858,45 @@ This is the **canonical per-post analytics endpoint** — use it for any
 engagement-feedback loop. Open rate, click-through rate, and the daily
 7-day trend are particularly useful as AI prompt signals.
 
+### ✅ `GET /api/v1/publication/stats/emails/timeseries`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of `[date_string, count]` pairs, one per day going back
+~1 year. The `count` is daily email sends. Useful for plotting send volume.
+```json
+[["2025/06/24", 72], ["2025/06/25", 72], ["2025/06/26", 71], ...]
+```
+
+### ✅ `GET /api/v1/publication/stats/network_attribution`
+**Host:** `{subdomain}.substack.com`
+**Returns:**
+```json
+{
+  "rows": [
+    {
+      "publication_id": 1193634,
+      "time_window": "90 days",
+      "is_subscribed": false,
+      "criteria": 3,
+      "label": "Substack existing accounts",
+      "subs_count": 1,
+      "pct_time_window_total": 1,
+      "data_updated_at": "..."
+    }
+  ]
+}
+```
+Subscriber attribution by source — how many came from each channel
+("Substack existing accounts", "Notes", "Direct", etc.) over a time window.
+
+### ✅ `GET /api/v1/publication/stats/payment_pledges`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ pledgeAndUserData: [...], summary: { count, hasMore } }`.
+Per-user paid-pledge breakdown.
+
+### ✅ `GET /api/v1/publication/stats/can-delete-archive`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Permission flag for deleting archived stats. Admin-only.
+
 ### ✅ `GET /api/v1/publish-dashboard/summary-v2?range={N}`
 **Host:** `{subdomain}.substack.com`
 **Query:** `range` accepts integer day counts. Verified: `7`, `30`, `365`.
@@ -445,9 +923,113 @@ Use to compute deltas: subs added, ARR change, etc. over the window.
 **Returns:** `{ liveStreams: [...], hasMore: boolean }`. Empty array for
 pubs with no live streams.
 
+### ✅ `GET /api/v1/live_stream/eligible_hosts`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ users: [{ id, name, handle }] }`. Users who can host a
+live stream for this publication (admins/editors).
+
 ---
 
 ## Publication settings
+
+### ✅ `GET /api/v1/publication`
+**Host:** `{subdomain}.substack.com` — important: this 403s from
+`substack.com` but **200s from the pub subdomain**.
+**Returns:** The full publication object:
+```json
+{
+  "id": 1193634,
+  "subdomain": "anthonydavidadams",
+  "is_personal_mode": false,
+  "name": "The Impossible Path",
+  "custom_domain": null,
+  "logo_url": "https://substackcdn.com/...",
+  ...
+}
+```
+Use as the read-side companion to `PUT /publication` (settings update).
+
+### ✅ `PUT /api/v1/publication`
+**Host:** `{subdomain}.substack.com`
+**Body:** A partial publication object. With an empty body you get
+`{"error":"No valid publication parameters provided"}` — confirming the
+endpoint exists. Field allowlist not yet fully enumerated; known-good
+fields based on the `GET` response shape include `name`, `logo_url`,
+`hero_text`, `description`. PRs welcome to expand this with confirmed
+writable fields.
+
+### ✅ `GET /api/v1/publication/logo`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Logo metadata.
+
+### ✅ `GET /api/v1/publication/bestseller_tier`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ bestseller_tier: null | <tier> }`. The Substack
+"Bestseller" badge tier the publication qualifies for (or null).
+
+### ✅ `GET /api/v1/publication/publication_tags`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of category tags the publication has chosen.
+```json
+[
+  { "id": 355, "name": "Health & Wellness", "canonical_name": "Health & Wellness", "active": true, "parent_tag_id": null },
+  { "id": 96,  "name": "Culture",           "canonical_name": "culture",            "active": true, "parent_tag_id": null }
+]
+```
+**Note:** These are the **publication-level discovery tags** (think:
+categories Substack groups pubs into), distinct from `/publication/post-tag`
+which is the per-post tag system.
+
+### ✅ `GET /api/v1/publication/post-tag/settings`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Same as `/publication/post-tag` but each tag includes a
+`navigationBarItem` field — when non-null, the tag appears in the pub's
+top navigation bar.
+
+### ✅ `GET /api/v1/publication/subdomain/can_alias`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ can_alias: true | false }`. Whether the pub can be aliased
+to a different subdomain (subscription-tier or admin-permission gated).
+
+### ✅ `GET /api/v1/publication/transfer_ownership/status`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Current state of any in-flight ownership transfer.
+
+### ✅ `GET /api/v1/publication_user`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ pub_users: [{ id, publication_id, user_id, public, public_rank, name, bio, ... }] }`.
+The per-user publication roles + bios. Note the underscore in the path
+(`publication_user`) — sibling endpoint `/publication/users` (plural,
+slash) also exists and gives a slightly different shape.
+
+### ✅ `GET /api/v1/publication_user_invite`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of pending co-author invites. Empty `[]` when none.
+**Note:** NOT `/publication/invites` (which 403s).
+
+### ✅ `POST /api/v1/publication/invite`
+**Host:** `{subdomain}.substack.com`
+**Body:** `{ email, name }` — both required.
+**Returns:** Empty `{ email, name }` returns `400` with both fields named
+in `errors`. With valid fields, sends a co-author invite to that email.
+**⚠️** This sends a real email. Don't probe with a real address you don't
+own.
+
+### ✅ `GET /api/v1/publication/sections`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of publication sections (multi-section pubs use these
+to split content into topic streams). Empty `[]` for non-sectioned pubs.
+
+### ✅ `GET /api/v1/publication_pages`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Custom pub pages (about, archive, etc.). Empty `[]` when
+none are configured.
+
+### ✅ `GET /api/v1/publication_export`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of subscriber CSV-export jobs (the "Download
+subscribers" UI flow creates one). Each entry has the job status + a
+download URL when complete.
 
 ### ✅ `GET /api/v1/publication/users`
 **Host:** `{subdomain}.substack.com`
@@ -500,6 +1082,32 @@ When you GET a post via `/posts/by-id/{id}`, attached tags are in a
   }
 }
 ```
+
+### ✅ `POST /api/v1/publication`  ⚠️ **captcha-gated**
+**Host:** `substack.com`
+**Body:**
+```json
+{
+  "name": "My Publication",
+  "subdomain": "mypublication",
+  "hero_text": "A description longer than the minimum length."
+}
+```
+**Required fields** (enumerated by sending progressively-filled bodies and
+reading the field-level error messages): `name`, `subdomain`, `hero_text`.
+With all three populated and a valid (non-taken) subdomain, Substack
+returns:
+```json
+{ "error": "Please complete the captcha to continue", "type": "single" }
+```
+**That's the wall.** Publication creation is captcha-gated by design —
+not headlessly automatable with cookies alone. The mechanism is also
+not a thin client-side toggle: the request includes a captcha-solution
+token in the body (likely from hCaptcha or similar), which Substack
+verifies server-side.
+
+**For automation:** create your pub once via the web UI, then use the
+API for everything thereafter. The captcha is on creation only.
 
 ### ✅ `GET /api/v1/publication_launch_checklist`
 **Host:** `{subdomain}.substack.com`
@@ -556,13 +1164,24 @@ These exist but return 403 even with a valid cookie:
 - 🔒 `GET /api/v1/admin/publications`
 - 🔒 `GET /api/v1/user/profile` (note: WITHOUT `/self`)
 - 🔒 `GET /api/v1/user/me`
-- 🔒 `GET /api/v1/publication` (without ID)
+- 🔒 `GET /api/v1/publication` on **`substack.com`** — but **200 from
+  the pub subdomain** (`{sub}.substack.com`). The endpoint is host-specific.
 - 🔒 `GET /api/v1/publication/subscriptions` (likely needs Pro plan or higher
   permission tier)
+- 🔒 `GET /api/v1/publication/recommendations` from `substack.com` — but
+  the equivalent `/recommendations/from/{pub_id}` on the pub host works.
 
-These probably require publication-context that Substack derives from
-something we haven't found yet (CSRF token, X-header, internal IP allowlist).
-PRs welcome if you crack any.
+**Two-host trick:** several endpoints are gated on `substack.com` but open
+on the pub subdomain (or vice versa). If you get 403 on one host, try the
+other before assuming the endpoint is dead.
+
+**Browser-vs-curl gap:** a small number of endpoints (notably the
+recommendations one) return 403 from a plain curl but 200 from a real
+Chromium session with the same cookie. The difference appears to be
+either a header sent by the SPA (`Sec-Fetch-*`, `Referer`, `Origin`) or
+referer-based gating. If a "should work" endpoint 403s from curl, try
+adding full browser headers, or drive a real Chromium with Playwright /
+Puppeteer.
 
 ## Headers cheatsheet
 
@@ -627,10 +1246,67 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
 - *(SOLVED — `GET /post_management/detail/{post_id}?offset=0&limit=1`
   returns the post with a nested `stats` dict containing 31 engagement
   fields. See "Stats & analytics" section above.)*
+- *(SOLVED — Recommendations at `GET /recommendations/from/{publication_id}`
+  on the pub host. 403 from raw curl, 200 from a real browser. See
+  "Recommendations" above.)*
+- *(SOLVED — Reader comments at `GET /post/{id}/comments`,
+  `POST /post/{id}/comment` body `{body}`, delete via
+  `DELETE /comment/{id}`. See "Reader comments" above.)*
+- *(SOLVED — DMs at `GET /messages/inbox` + `/messages/unread-count`.
+  Send-DM endpoint still not mapped — capture the "Send" click in the
+  DM compose UI.)*
+- *(SOLVED — Inbox + reader feed: `GET /inbox/top`, `POST /inbox/seen`,
+  `GET /reader/feed/tabs`. See "Inbox & reader feed".)*
 - **Image MULTIPART upload** — JSON+base64 works (`/api/v1/image`); multipart
   to the same path 400s.
+- **`PUT /publication` writable field allowlist** — endpoint exists,
+  empty body returns "No valid publication parameters provided". The
+  full field allowlist needs capture from the settings UI (each toggle
+  fires a PUT — capture name, logo_url, hero_text, theme, custom CSS,
+  welcome email, custom_domain, language, etc.).
+- **`POST /api/v1/settings` accepted `settingName` values** — enum of
+  settings keys the generic key-value setter accepts. Capture from
+  the account-settings page's toggles.
+- **`POST /subscriber/add` required body** — endpoint exists, empty
+  body returns `{}` (no-op). The web UI's "Add subscriber" form sends
+  `{email, name?, tier?}`. Capture from a real "Add subscriber" click.
+- **Send DM** — likely `POST /messages` with `{recipient_user_id, body}`.
+- **Add / remove recommendation** — likely `POST /recommendations`
+  with `{publication_id, note?}`. Capture from the "Add recommendation"
+  flow.
+- **Reaction post** — `GET /threads/reactions` returns the catalog of
+  reaction types. The POST that applies one is not yet mapped.
+- **Comment moderation delete** — likely `POST /comment/moderation/delete`
+  with a `reason_id` from `/comment/moderation/delete_reasons`.
+- **Custom domain setup** — UI flow exists but endpoints not mapped.
+- **Welcome email / auto-sequences** — UI exists, endpoints not mapped.
+- **Audio / video / podcast upload** — separate from `/image`. Likely
+  S3-presigned-URL pattern (request signed URL, PUT bytes to S3,
+  notify Substack the asset is ready).
+- **Substack Chat (writer chats)** — entirely uncracked. Distinct from
+  Notes and from DMs.
+- **Mobile push token registration** — not mapped.
 
 ### Recently solved (kept as breadcrumbs)
+- **Round 10 + 11 (Playwright capture sweep, 2026-06-23)** — drove a
+  headless Chromium with the writer cookie through the admin SPA
+  (publish dashboard, settings sub-pages, Notes home, search). Picked
+  up 70+ endpoints in two runs, including the previously-403'd
+  recommendations endpoint (works in-browser due to header/referer
+  gating), the messages/DMs inbox surface, paid-pledge config, Stripe
+  account status, per-post mute settings, comment moderation reasons,
+  reaction catalog, reader feed tabs, global search modules, and
+  publication CSV-export jobs. Capture script lives at
+  `/tmp/substack-capture/capture.js`.
+- **Round 9 (curl probe sweep, 2026-06-23)** — empirical-error probing
+  enumerated required fields by sending intentionally-invalid POSTs.
+  Cracked publication creation (captcha-gated, fields
+  `{name, subdomain, hero_text}`), magic-link login (`POST /email-login`),
+  generic settings setter (`POST /settings`), reader-comment create
+  (`POST /post/{id}/comment`), co-author invite (`POST /publication/invite`),
+  subscriber add/remove (`POST /subscriber/add`, `DELETE /subscriber/{id}`),
+  publication settings update (`PUT /publication`), subscriber import
+  status (`GET /import`).
 - **Per-post stats** → `GET /post_management/detail/{post_id}` with
   `offset=0&limit=1` (round 8 — captured via publish/posts/detail/{id}).
   The `stats` dict has 31 fields including open_rate, ctr, opens, clicks,

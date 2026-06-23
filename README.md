@@ -63,13 +63,31 @@ PRs welcome to upgrade ❓ → 🟡 → ✅.
 ## Status
 
 This reference covers the endpoints needed for:
-- ✅ Authentication and account discovery
+- ✅ Authentication: cookie + magic-link login
+- ✅ Account discovery, blocked users, public profile
 - ✅ Listing user's publications (with role)
-- ✅ Drafts: create, update, delete, publish
-- ✅ Reading published posts
-- 🟡 Subscribers / contacts
-- 🟡 Notes (Substack's Twitter-like surface)
-- ❓ Analytics / stats
+- ✅ Drafts: create, update, delete, publish, schedule, counts
+- ✅ Reading published posts + admin post management
+- ✅ Subscribers: list (filter/sort/paginate), add, remove, import status
+- ✅ Notes: create, list, profile feed, home feed, delete, seen
+- ✅ Reader comments on posts: list, create, delete, moderation reasons
+- ✅ Analytics: publication summary, per-post stats (31 fields), email
+  timeseries, network attribution, payment pledges
+- ✅ Tags + sections: per-post tags, publication-level tags, sections
+- ✅ DMs / messages: inbox + unread count
+- ✅ Recommendations (cross-pub promotion): listing
+- ✅ Paid subscriptions: Stripe account status, pledge plan tiers
+- ✅ Inbox & reader feed: posts inbox, Notes feed, tabs, search modules,
+  global search
+- ✅ Reactions catalog, comment moderation enum, per-post mute settings
+- ✅ Image upload
+- ✅ Publication CRUD (create is captcha-gated; read + update work)
+- 🟡 Cross-posting auth (YouTube / LinkedIn) — read endpoints mapped
+- 🟡 Live streams — read endpoints + eligible hosts
+- ❓ Audio / video / podcast upload (likely S3-presigned)
+- ❓ Substack Chat (writer chats)
+- ❓ Custom domain config
+- ❓ Welcome email + auto-sequences
 
 ## License
 
