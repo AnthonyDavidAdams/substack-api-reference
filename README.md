@@ -83,7 +83,9 @@ This reference covers the endpoints needed for:
 - ✅ Image upload
 - ✅ Publication CRUD: read, update (single field per `PUT`), captcha-gated create
 - ✅ Publication settings (`/publication_settings`): boolean toggle read/write
-- ✅ Recommendations (full surface): list, suggested, edge check, stats, search
+- ✅ Recommendations (full surface): list, suggested, edge check, stats, search, **add/remove**
+- ✅ Audio upload (S3 presigned multipart pattern); audio is used for podcasts too
+- ✅ Substack Chat (writer chats / threads): enable + disable
 - 🟡 Cross-posting auth (YouTube / LinkedIn) — read endpoints mapped
 - 🟡 Live streams — read endpoints + eligible hosts
 - ❓ Audio / video / podcast upload (likely S3-presigned)

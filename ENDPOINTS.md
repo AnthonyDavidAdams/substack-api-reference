@@ -670,6 +670,43 @@ cookie. The difference appears to be either a header sent by the SPA or
 referer-based gating. If you need to hit them headlessly, send full
 browser-style headers including `Sec-Fetch-*`, `Referer`, `Origin`.
 
+### ✅ `PUT /api/v1/recommendations`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "recommended_publication_id": 7928971,
+  "recommending_publication_id": 1193634,
+  "source": "recommendation-stats",
+  "suggested": false
+}
+```
+**Fields:**
+- `recommended_publication_id` — the pub being recommended
+- `recommending_publication_id` — the pub doing the recommending
+- `source` — string tracking the click origin. Observed values:
+  `recommendation-stats` (clicked from the dashboard's suggestions).
+  Likely also `manual-search`, `suggested-modal`, etc.
+- `suggested` — boolean, whether the rec came from Substack's suggested
+  list (vs. manual search)
+
+**Returns:** `200` on success. The endpoint is **idempotent** — recommending
+the same pub twice is a no-op (matches the `recommendations/from/{from}/to/{to}`
+existence-check pattern).
+
+### ✅ `DELETE /api/v1/recommendations/`
+**Host:** `{subdomain}.substack.com` — **note the trailing slash** in the
+path (`/recommendations/` not `/recommendations`).
+**Body:**
+```json
+{
+  "recommended_publication_id": 7928971,
+  "recommending_publication_id": 1193634,
+  "source": "recommendation-stats"
+}
+```
+Same fields as `PUT` minus `suggested`. Removes an outgoing recommendation.
+
 ### ✅ `GET /api/v1/recommendations/from/{publication_id}`
 **Host:** `{subdomain}.substack.com` (the recommending pub's host)
 **Optional query:** `offset`, `limit`, `paginate=true` (the web UI passes
@@ -1246,6 +1283,102 @@ have this wrong.
 
 ---
 
+## Audio upload (S3 multipart pattern)
+
+The audio insert flow in the post editor reveals a 4-step S3-presigned
+multipart upload sequence. Audio is uploaded to S3 directly (not through
+Substack), then Substack is told to complete the multipart upload and
+transcode. The same path is reused for podcast episodes.
+
+### ✅ `POST /api/v1/audio/upload`
+**Host:** `{subdomain}.substack.com`
+**Body:** Empty (`{}`) — though the web client may send richer
+parameters (file size, content type) for chunking decisions; needs
+more testing.
+**Returns:** A response containing the `media_upload_id` (UUID) and one
+or more S3 pre-signed PUT URLs targeting
+`https://substack-video.s3-accelerate.amazonaws.com/video_upload/post/{post_id}/{upload_id}/original?...`.
+Yes, audio uploads use the `substack-video` bucket and the `video_upload`
+path — that's not a typo, it's a unified media store.
+
+### ✅ `PUT <s3-presigned-url>` (S3, not Substack)
+**Host:** `substack-video.s3-accelerate.amazonaws.com`
+**Body:** Raw file bytes.
+**Returns:** `200` from S3 with an `ETag` header. **Save the ETag** —
+you need it for the next step.
+
+### ✅ `POST /api/v1/audio/upload/{upload_id}/transcode`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "duration": null,
+  "multipart_upload_id": "bdohqlFEhD4U2rlPq1Nuero.Lg_LoZoh6Y...",
+  "multipart_upload_etags": ["\"7934201b4a7be4e377bca86ae28f0714\""]
+}
+```
+**Fields:**
+- `duration` — file duration in seconds. `null` is accepted (Substack
+  measures it during transcode).
+- `multipart_upload_id` — opaque token from the S3 presigned URL's
+  `uploadId` query param. Substack uses this to call S3's
+  CompleteMultipartUpload on the writer's behalf.
+- `multipart_upload_etags` — array of ETags returned by each S3 part
+  upload. ETag values include surrounding quote characters, which must
+  be preserved (`"abc..."`).
+
+**Returns:** `200` on success → transcoding starts asynchronously.
+
+### ✅ `GET /api/v1/audio/upload/{upload_id}`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Upload + transcode status. The web client polls this
+until status indicates "ready" or "failed."
+
+**Validation:** Substack rejects very-short audio files (~<1s of real
+audio) with a generic "Something went wrong with your audio file upload"
+error after the transcode step. Use real-world content (≥1 second of
+non-silence) when probing this flow.
+
+---
+
+## Substack Chat (writer chats / threads)
+
+Substack Chat is internally called "threads" (`/publication_threads_settings`,
+`threads_v2_enabled`). This is the publication-level chat for subscribers,
+distinct from Notes (`/comment/feed`) and from DMs (`/messages/inbox`).
+
+### ✅ `POST /api/v1/publication/{publication_id}/publication_threads_settings`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "threads_v2_enabled": true,
+  "create_thread_minimum_role": "free_subscriber",
+  "reader_thread_notifications_enabled": true
+}
+```
+**Fields:**
+- `threads_v2_enabled` — master toggle. `true` enables Chat for the pub;
+  `false` disables it.
+- `create_thread_minimum_role` — who can start a new thread. Verified
+  value: `free_subscriber`. The "Who can start conversations?" dropdown
+  in the create-chat modal shows "Everyone" as the default — likely
+  also `everyone`, `paid_subscriber`, `founding_member`.
+- `reader_thread_notifications_enabled` — whether subscribers get push
+  notifications for new threads.
+
+**Returns:** `200` on success. Same endpoint enables and disables —
+just flip `threads_v2_enabled`. **The publication shows "Start your
+subscriber chat" UI when disabled and a thread list when enabled.**
+
+### ❓ Send a thread message
+Not yet mapped. The web app likely uses
+`POST /api/v1/comment/feed` (the Notes endpoint) with a different
+`context` field, or `POST /publication/{pub_id}/threads`. Capture the
+"Start a new thread" + send flow to confirm.
+
+---
+
 ## Categories
 
 ### ✅ `GET /api/v1/category/public/{category_id}/{category_type}`
@@ -1408,6 +1541,20 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
 - **Mobile push token registration** — not mapped.
 
 ### Recently solved (kept as breadcrumbs)
+- **Round 13 (Chrome-extension destructive cycles, 2026-06-23)** —
+  with explicit user consent, ran add-then-revert cycles on real
+  publication actions to capture write-side bodies that couldn't be
+  reached by passive observation. Cracked:
+  (a) `PUT /recommendations` body and `DELETE /recommendations/` body
+  (note the trailing slash); idempotent design.
+  (b) The full **audio upload** sequence: `POST /audio/upload` → S3
+  presigned PUT to `substack-video.s3-accelerate.amazonaws.com` →
+  `POST /audio/upload/{id}/transcode` with multipart_upload_id +
+  etags → `GET /audio/upload/{id}` polling for status.
+  (c) **Substack Chat** enable/disable via
+  `POST /publication/{pub_id}/publication_threads_settings` with
+  `threads_v2_enabled`, `create_thread_minimum_role`,
+  `reader_thread_notifications_enabled`.
 - **Round 12 (Chrome-extension live capture, 2026-06-23)** — drove the
   user's real Chromium via the Claude Code Chrome integration, monkey-
   patched `window.fetch` and `XMLHttpRequest.send` from a `localStorage`-
