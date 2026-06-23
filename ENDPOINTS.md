@@ -134,17 +134,40 @@ immediately — **IRREVERSIBLE**.
 
 ### ✅ `GET /api/v1/drafts/{id}/prepublish`
 **Host:** `{subdomain}.substack.com`
-**Returns:** `{ errors: [...], suggestions: [...] }` — pre-flight check for the
-draft. Empty arrays = ready to publish. Use this before calling `/publish` to
-warn the editor of missing-image / unsubscribe / spam-trigger issues.
+**Optional query:** `publish_date=<ISO datetime>` — when scheduling, the web
+app passes the proposed time so prepublish can validate it.
+**Returns:** `{ errors: [...], suggestions: [...] }` — pre-flight check.
+Empty arrays = ready to publish.
 
 **Note:** The verb is **GET**, not PUT/POST as some older clients say.
 
-### ❌ `PUT /api/v1/drafts/{id}/schedule` (DOES NOT EXIST)
-**Confirmed 404** at `/api/v1/drafts/{id}/schedule` for POST, PUT. Scheduling
-via the publish endpoint with `post_date` ALSO 404s. The web app's scheduling
-flow uses a different mechanism we haven't reverse-engineered yet — likely a
-non-`/api/v1/*` path. Open question.
+### ✅ Scheduling: `POST /api/v1/drafts/{id}/scheduled_release`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "trigger_at": "2027-01-01T12:00:00.000Z",
+  "post_audience": "everyone"
+}
+```
+**Returns:** The draft object with scheduling info attached.
+**Critical:** The field name is **`trigger_at`**, NOT `post_date` /
+`publish_date` / `scheduled_at`. Substack rejects the request with
+`{"errors":[{"param":"trigger_at","msg":"Invalid value"}]}` if you use the
+wrong name — that error is also how I found the right one.
+
+**`post_audience`** accepts: `everyone` (verified). Other values likely
+mirror the audience options in the publish UI (`subscribers_only`,
+`paid_subscribers_only`).
+
+### ✅ `GET /api/v1/drafts/{id}/scheduled_release`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array — `[]` if not scheduled, or
+`[{ trigger_at, post_audience, email_audience }]` when active.
+
+### ✅ `DELETE /api/v1/drafts/{id}/scheduled_release`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of cancelled schedule IDs. Unschedules the draft.
 
 ---
 
@@ -504,11 +527,8 @@ haven't been identified. The fastest way to crack each:
 
 Currently unsolved (need targeted captures — pattern-guessing exhausted):
 
-- **Scheduling a post for a future date** — `/drafts/{id}/schedule` doesn't
-  exist as GET, POST, or PUT. `/drafts/{id}/publish` with `post_date` 404s.
-  `PUT /drafts/{id}` with `post_date` returns "Post must be published to
-  change post date". The web app's "Schedule" button hits some unknown
-  path — capture it from drafts → Edit → Schedule.
+- *(SOLVED — `POST /drafts/{id}/scheduled_release` with body
+  `{trigger_at, post_audience}`. See "Scheduling" section above.)*
 - *(SOLVED — Notes are at `POST /comment/feed` for creating,
   `GET /reader/feed` for the home feed, `GET /reader/feed/profile/{user_id}`
   for a profile, `DELETE /comment/{id}` for deletion. See the "Notes"
@@ -522,6 +542,12 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
   to the same path 400s.
 
 ### Recently solved (kept as breadcrumbs)
+- **Post scheduling** → `POST /drafts/{id}/scheduled_release` with
+  `{trigger_at, post_audience}` (round 6 — captured via drafts → Edit →
+  Schedule). The field is `trigger_at`, not `post_date` or `publish_date`.
+- **Notes API** → `POST /comment/feed` (create), `GET /reader/feed`
+  (home), `GET /feed/drafts` (drafts list), `DELETE /comment/{id}`
+  (round 5).
 - **Subscribers list** → `POST /api/v1/subscriber-stats` (round 4 —
   captured via Substack admin → publish/subscribers). It's a POST with
   filters in the body, which is why every GET probe missed it.
