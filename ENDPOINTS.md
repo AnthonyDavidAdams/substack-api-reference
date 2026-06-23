@@ -1410,6 +1410,121 @@ The `image2` node by itself (without the `captionedImage` wrapper) gets
 silently stripped on save. So does a plain `{type:"image", attrs:{src}}`
 node — that's a different schema that Substack's parser doesn't accept.
 
+### ✅ The `subscribeWidget` ProseMirror block
+
+Substack's native subscribe button — the publication's branded CTA that
+appears in many writers' posts. As a draft_body block:
+
+```json
+{
+  "type": "subscribeWidget",
+  "attrs": {
+    "url": "https://yourpub.substack.com/subscribe",
+    "text": "Subscribe",
+    "language": "en"
+  }
+}
+```
+
+All three attrs are optional. With `url` omitted the editor auto-binds it
+to the current publication's subscribe page. `text` overrides the button
+label. `language` is for localized button copy. Substack's editor itself
+emits the full triplet on a fresh insert; mirroring that shape is the
+safe play.
+
+The widget is a **leaf node** (no `content` array). Place it as a
+top-level block in the doc, ideally with an `hr` above it to visually
+separate from preceding content.
+
+---
+
+## ProseMirror node inventory
+
+For clients building draft bodies from scratch, here's the full set of
+node types we've verified Substack accepts in `draft_body`. All examples
+are top-level block nodes unless noted; inline text nodes carry `marks`
+for emphasis.
+
+| Node | Required attrs | Notes |
+|---|---|---|
+| `doc` | — | Root. Contains an array of block nodes in `content`. |
+| `paragraph` | `attrs.textAlign` (nullable) | Default block. `content` is inline text/marks. |
+| `heading` | `attrs.level` (2–4), `attrs.textAlign` | `level: 1` is reserved for the post title. |
+| `bullet_list` | — | Contains `list_item` children. |
+| `ordered_list` | — | Contains `list_item` children. |
+| `list_item` | — | Contains `paragraph` children. |
+| `blockquote` | — | Contains paragraph/heading children. |
+| `horizontal_rule` | — | Leaf node. Adjacent rules collapse into one in the rendered post. |
+| `captionedImage` | — | Wrapper for `image2` + optional `caption`. See above. |
+| `image2` | 14 attrs (see image embed section) | Only valid inside a `captionedImage`. |
+| `caption` | — | Only valid inside a `captionedImage`. Holds inline text nodes. |
+| `subscribeWidget` | optional `url`/`text`/`language` | Leaf node. See above. |
+
+Inline text marks (apply via `marks: [{type: "..."}]` on a `text` node):
+
+| Mark | Required attrs | Notes |
+|---|---|---|
+| `strong` | — | Bold. |
+| `em` | — | Italic. |
+| `code` | — | Monospace. |
+| `link` | `attrs.href` (required), `attrs.target`, `attrs.rel` | External links should use `target: "_blank"`, `rel: "noopener"`. |
+
+### Common client gotchas
+
+These are the silent-failure modes that have eaten the most time for
+clients building against this API:
+
+1. **`draft_body` is a STRING, not a JSON object.** The field's value is a
+   stringified ProseMirror document. If you submit a JSON object, Substack
+   stores it as a single text node and the post renders as visible
+   `{type:"doc",...}` markup.
+
+2. **Foreign image URLs are silently stripped.** The editor's render
+   pipeline only displays images on `substack-post-media.s3.amazonaws.com`,
+   `substackcdn.com`, or `substack-video.s3-accelerate.amazonaws.com`. Embed
+   a foreign URL and Substack accepts the draft but shows no image.
+   Upload via `POST /api/v1/image` first, then use the returned URL.
+
+3. **`image2.attrs.width`/`height`/`bytes` must be the real upload
+   values.** Zeroes are accepted but render as empty placeholders. Source
+   these from the upload response's `imageWidth`, `imageHeight`, `bytes`.
+
+4. **Plain `{type:"image", attrs:{src}}` doesn't work.** Use the nested
+   `captionedImage > image2` shape exclusively.
+
+5. **HTML in `draft_body` mostly works, but with caveats.** Email-template
+   HTML with `<table>`, `<tr>`, `<td>`, `mso-conditional` comments, and
+   inline `<style>` blocks renders as visible markup. For complex content,
+   build a ProseMirror doc and stringify it.
+
+6. **The `trigger_at` field on `scheduled_release`** — NOT `post_date`,
+   `publish_date`, or `scheduled_at` (see Scheduling).
+
+7. **The `reaction` field on `POST /post/{id}/reaction` is a literal
+   emoji character** (`"❤"`), NOT a named reaction string. The
+   `GET /threads/reactions` catalog returns named strings, but the wire
+   format for post reactions is the unicode character.
+
+8. **`DELETE /recommendations/` has a trailing slash** in the path —
+   `/recommendations/` not `/recommendations`. The bare path 404s.
+
+9. **`DELETE /community/posts/{id}` for chat threads**, NOT
+   `DELETE /community/publications/{pub_id}/posts/{id}` (that 404s).
+
+10. **Thread create `id` is client-generated** — Substack uses the
+    UUID you send as the canonical thread id, not one it assigns.
+
+11. **`POST /publication` is captcha-gated** — body fields validate, but
+    a captcha-solution token is also required server-side. Not
+    headlessly automatable; create pubs via the web UI then drive the
+    API for everything else.
+
+12. **Server-side fetch of `image_url` needs absolute URLs.** If your
+    own app stores images as relative paths (e.g. `/uploads/x.png`) and
+    you're building the draft body server-side, absolutize against your
+    app's public URL before calling `POST /api/v1/image`. Node's `fetch`
+    can't parse relative paths.
+
 ---
 
 ## Audio upload (S3 multipart pattern)

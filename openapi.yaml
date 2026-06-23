@@ -936,6 +936,33 @@ components:
             type: object
             description: 'Text node — `{type: "text", text: "...", marks?: [...]}`.'
 
+    SubscribeWidgetBlock:
+      type: object
+      description: |
+        Substack-native subscribe button as a ProseMirror leaf block. With
+        `url` omitted, the editor auto-binds to the current publication.
+        Substack's own editor emits the full {url, text, language} triplet
+        on a fresh insert; mirroring that is the safe play.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [subscribeWidget]
+        attrs:
+          type: object
+          properties:
+            url:
+              type: string
+              description: Subscribe URL. Defaults to current publication when omitted.
+            text:
+              type: string
+              description: Button label.
+              example: Subscribe
+            language:
+              type: string
+              description: Localization code for button copy.
+              example: en
+
     AudioUploadInit:
       type: object
       description: |
