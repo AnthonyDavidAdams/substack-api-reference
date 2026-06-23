@@ -181,6 +181,67 @@ post IDs are returned in every list endpoint.
 
 ---
 
+## Subscribers
+
+### ✅ `POST /api/v1/subscriber-stats`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "filters": { "order_by_desc_nulls_last": "subscription_created_at" },
+  "limit": 50,
+  "offset": 0
+}
+```
+**Returns:**
+```json
+{
+  "count": 78,
+  "subscribers": [
+    {
+      "user_id": 305187638,
+      "user_email_address": "...",
+      "user_name": "...",
+      "user_photo_url": null,
+      "subscription_id": 1358293107,
+      "subscription_created_at": "2026-06-04T19:51:29.324Z",
+      "subscription_interval": "free",   // free / monthly / annual
+      "subscription_type": null,
+      "is_subscribed": false,
+      "is_founding": false,
+      "is_free_trial": false,
+      "is_gift": false,
+      "is_comp": false,
+      "is_bitcoin": false,
+      "activity_rating": 1,
+      "total_revenue_generated": 0,
+      "total_count": 78
+    }
+  ],
+  "pendingImports": [],
+  "pendingCRMImportsCount": 0,
+  "order": { "by": "subscription_created_at", "direction": "desc" },
+  "chartCounts": {
+    "created_at": "2022-11-15T14:06:31.157Z",
+    "subscribers": 0,
+    "lifetime_subscribers": 0,
+    // ... daily snapshots
+  },
+  "batchSubscriberActions": [],
+  "lastSync": "2026-06-23T05:35:09.172Z"
+}
+```
+
+**Important:** This is a **POST**, not a GET. Body's `filters` object supports
+sort variants; `limit`/`offset` for pagination. `count` is the total subscriber
+count — useful even when you only need the number.
+
+**Why a POST for a read?** Substack uses POST for endpoints that take rich
+filter objects in the body. Same pattern as other "search with filters"
+endpoints in the surface.
+
+---
+
 ## Stats & analytics
 
 ### ✅ `GET /api/v1/publish-dashboard/summary`
@@ -294,9 +355,7 @@ that list them are wrong — they probably worked in an earlier Substack version
 - ❌ `GET /api/v1/reader/inbox`
 - ❌ `GET /api/v1/notes` (might exist scoped differently; not at this path)
 - ❌ `GET /api/v1/comments`
-- ❌ `GET /api/v1/contacts`
-- ❌ `GET /api/v1/free_subscribers`
-- ❌ `GET /api/v1/subscribers` (per-pub or root — both 404 / 403)
+- ❌ `GET /api/v1/contacts`, `GET /api/v1/subscribers`, `GET /api/v1/free_subscribers` — none of these GET forms exist. Use `POST /api/v1/subscriber-stats` instead.
 - ❌ `GET /api/v1/post_management/draft`
 - ❌ `GET /api/v1/post_management/stats`
 - ❌ `GET /api/v1/stats`
@@ -376,9 +435,7 @@ Currently unsolved:
 - **Scheduling a post for a future date** — `/drafts/{id}/schedule`,
   `/drafts/{id}/publish` with `post_date`, `PUT /drafts/{id}` with `post_date`
   all 404. The web app's "Schedule" button must hit something else.
-- **Subscriber list** — `/subscribers`, `/contacts`, `/publication/subscribers/*`
-  all 404 or 403. The Subscribers tab in pub admin works in the UI; the API path
-  is hidden behind something stricter.
+- *(SOLVED — see `POST /api/v1/subscriber-stats` above)*
 - **Notes (post / read)** — `/notes`, `/reader/notes`, `/feed/notes` all 404.
   `/api/v1/feed` exists but rejects `type=for-you|following|home|top` — valid
   values unknown.
@@ -390,6 +447,9 @@ Currently unsolved:
   upload.
 
 ### Recently solved (kept as breadcrumbs)
+- **Subscribers list** → `POST /api/v1/subscriber-stats` (round 4 —
+  captured via Substack admin → publish/subscribers). It's a POST with
+  filters in the body, which is why every GET probe missed it.
 - **Publication-level stats** → `/api/v1/publish-dashboard/summary` and
   `/publish-dashboard/summary-v2?range={N}` (round 3 — captured via
   Substack admin → publish/home dashboard)
