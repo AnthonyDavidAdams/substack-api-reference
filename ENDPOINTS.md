@@ -358,6 +358,67 @@ endpoints in the surface.
 Includes **open rate** — the single most useful publication-level metric for
 editorial feedback loops.
 
+### ✅ `GET /api/v1/post_management/detail/{post_id}?offset=0&limit=1`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ posts: [<post>], total: 1 }` — the post object with a
+nested **`stats`** dict containing the full per-post engagement breakdown.
+
+**`stats` shape (31 fields):**
+```js
+{
+  // delivery
+  sent: 77,
+  delivered: 74,
+  // open metrics
+  opens: 84,              // total opens (incl. multiple per user)
+  opened: 21,             // unique users who opened
+  open_rate: 0.283784,    // opened / delivered
+  // click metrics
+  clicks: 2,
+  clicked: 1,
+  click_through_rate: 0.047619,
+  engagement_rate: 0.047619,
+  // post-level
+  views: 113,
+  shares: 1,
+  signups: 1,
+  subscribes: 0,
+  // funnel within 1 day of receipt
+  signups_within_1_day: 0,
+  subscriptions_within_1_day: 0,
+  unsubscribes_within_1_day: 0,
+  disables_within_1_day: 0,
+  // podcast
+  downloads: 0,
+  downloads_day7: 0,
+  downloads_day30: 0,
+  downloads_day90: 0,
+  podcast_preview_downloads: 0,
+  podcast_preview_downloads_day30: 0,
+  // video
+  video_views: 0,
+  video_minutes_watched: 0,
+  // breakdowns
+  firstWeekDailyStats: [<7 daily snapshots>],
+  links: [<clicked-link records>],
+  referrers: { /* traffic sources */ },
+  comps: { /* gift/comp subscribers */ },
+  has_more_links: false,
+  // monetization
+  estimated_value: 0
+}
+```
+
+**Why this endpoint exists at `post_management/detail`** instead of
+something obvious like `/post/{id}/stats`: Substack's "post detail" admin
+page bundles the post object + its stats together. The `offset` and
+`limit` params are part of the management list query convention (vestigial
+on the single-post detail call). 
+
+This is the **canonical per-post analytics endpoint** — use it for any
+engagement-feedback loop. Open rate, click-through rate, and the daily
+7-day trend are particularly useful as AI prompt signals.
+
 ### ✅ `GET /api/v1/publish-dashboard/summary-v2?range={N}`
 **Host:** `{subdomain}.substack.com`
 **Query:** `range` accepts integer day counts. Verified: `7`, `30`, `365`.
@@ -563,15 +624,19 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
   `GET /reader/feed` for the home feed, `GET /reader/feed/profile/{user_id}`
   for a profile, `DELETE /comment/{id}` for deletion. See the "Notes"
   section above.)*
-- **Per-post stats** — `/post/{id}/stats`, `/post-stats/{id}`,
-  `/posts/{id}/stats`, `/publish-dashboard/post-stats?post_id=X`,
-  POST `/post-stats` body `{post_id}` all 404. Stats tab on a sent post
-  must hit something — capture from publish/posts → click any sent post
-  → "Stats" view.
+- *(SOLVED — `GET /post_management/detail/{post_id}?offset=0&limit=1`
+  returns the post with a nested `stats` dict containing 31 engagement
+  fields. See "Stats & analytics" section above.)*
 - **Image MULTIPART upload** — JSON+base64 works (`/api/v1/image`); multipart
   to the same path 400s.
 
 ### Recently solved (kept as breadcrumbs)
+- **Per-post stats** → `GET /post_management/detail/{post_id}` with
+  `offset=0&limit=1` (round 8 — captured via publish/posts/detail/{id}).
+  The `stats` dict has 31 fields including open_rate, ctr, opens, clicks,
+  daily breakdowns, referrers, and unsubscribe metrics. Lives in
+  `post_management/` (the admin list namespace) rather than at a
+  `/stats` path.
 - **Post scheduling** → `POST /drafts/{id}/scheduled_release` with
   `{trigger_at, post_audience}` (round 6 — captured via drafts → Edit →
   Schedule). The field is `trigger_at`, not `post_date` or `publish_date`.
