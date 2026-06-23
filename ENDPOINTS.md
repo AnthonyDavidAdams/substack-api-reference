@@ -406,9 +406,39 @@ tag IDs are UUIDs, not integers.
 **Host:** `{subdomain}.substack.com`
 **Returns:** `200 {}` on success.
 
-### 🟡 `POST /api/v1/post/{post_id}/tag/{tag_id}`
+### ✅ `POST /api/v1/post/{post_id}/tag/{tag_id}`
 **Host:** `{subdomain}.substack.com`
-**Use:** Attach a tag to a post.
+**Body:** empty (no JSON body required).
+**Returns:**
+```json
+{
+  "id": "<uuid — the post↔tag attachment id>",
+  "publication_id": 1193634,
+  "post_id": 184700516,
+  "post_tag_id": "<the tag uuid>"
+}
+```
+Note: `post_id` is the **integer** post id (from `/post_management/*` or
+`/posts/by-id`). `tag_id` is the **uuid** returned by
+`POST /publication/post-tag`. They're different types — easy to mix up.
+
+### ✅ `DELETE /api/v1/post/{post_id}/tag/{tag_id}`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `200 {}` on success. Detaches without deleting the tag itself.
+
+### Tags appear in post objects under `postTags`
+When you GET a post via `/posts/by-id/{id}`, attached tags are in a
+`postTags` array (not `tags`):
+```json
+{
+  "post": {
+    "id": 184700516,
+    "postTags": [
+      { "id": "<uuid>", "publication_id": 1193634, "name": "...", "slug": "...", "hidden": false }
+    ]
+  }
+}
+```
 
 ### ✅ `GET /api/v1/publication_launch_checklist`
 **Host:** `{subdomain}.substack.com`
