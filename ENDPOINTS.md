@@ -181,6 +181,78 @@ post IDs are returned in every list endpoint.
 
 ---
 
+## Notes (Substack's micro-blogging surface)
+
+Substack treats Notes as a kind of "comment" internally — the endpoint
+names use `comment` even though the UI calls them Notes.
+
+### ✅ `POST /api/v1/comment/feed`
+**Host:** `substack.com`
+**Body:**
+```json
+{
+  "bodyJson": {
+    "type": "doc",
+    "attrs": { "schemaVersion": "v1", "title": null },
+    "content": [
+      { "type": "paragraph", "content": [{ "type": "text", "text": "Hello." }] }
+    ]
+  },
+  "replyMinimumRole": "everyone"
+}
+```
+**Returns:** Created comment object with `id`. Use the id to delete.
+**Important:** `bodyJson` is a **ProseMirror document tree**, not plain text or
+HTML. The simplest valid shape is a `doc` containing one `paragraph` with one
+`text` node. For richer notes (links, mentions, images), inspect the
+ProseMirror schema by capturing a complex Note via DevTools.
+
+### ✅ `GET /api/v1/feed/drafts?limit=N`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ drafts: [], hasMore: boolean, nextCursor: string|null }` —
+list of saved Notes drafts for the publication.
+
+### ✅ `GET /api/v1/reader/feed/profile/{user_id}`
+**Host:** `substack.com`
+**Returns:** `{ items: [...] }` — the user's published Notes (and other
+profile activity) in chronological order. Each item has `entity_key`
+(`c-{comment_id}` for notes, `p-{post_id}` for posts), `type`, `context`
+(timestamp + nested data), `users`.
+
+### ✅ `GET /api/v1/reader/feed?limit=N`
+**Host:** `substack.com`
+**Returns:** `{ items: [...] }` — the cookie holder's personalized Notes
+home feed. Same item shape as `/reader/feed/profile/{user_id}` —
+`entity_key` prefixes are `c-{id}` for notes/comments, `p-{id}` for posts.
+
+### ✅ `GET /api/v1/feed/following`
+**Host:** `substack.com`
+**Returns:** `[user_id_1, user_id_2, ...]` — flat JSON array of user IDs
+the cookie holder follows. The first entry is always the user's own id.
+**Note:** Despite the `/feed` prefix, this is NOT a content feed — it's
+the **following list**. Sibling `/feed/{name}` paths (`foryou`, `home`,
+`top`, `notes`, `recommended`, `trending`, etc.) all 404.
+
+### ✅ `POST /api/v1/reader/feed/{entity_key}/seen`
+**Host:** `substack.com`
+**Body:** empty (`-d ''` or no body). The Cloudflare-friendly
+`Content-Length: 0` header is fine.
+**Use:** Mark a feed item as seen (the web client fires this on view for
+analytics). Mostly useful for clients that want to mirror the web's
+read-tracking behavior.
+
+### ✅ `DELETE /api/v1/comment/{comment_id}`
+**Host:** `substack.com`
+**Returns:** `200 {}` on success. The `{comment_id}` is the numeric id
+(without the `c-` prefix from `entity_key`). Works on Notes you authored.
+
+### ❌ `GET /api/v1/comment/feed`
+Returns 403 even with valid cookie. The read path for Notes is
+`/api/v1/reader/feed/profile/{user_id}`, NOT this. The `comment/feed`
+endpoint is POST-only.
+
+---
+
 ## Subscribers
 
 ### ✅ `POST /api/v1/subscriber-stats`
@@ -437,9 +509,10 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
   `PUT /drafts/{id}` with `post_date` returns "Post must be published to
   change post date". The web app's "Schedule" button hits some unknown
   path — capture it from drafts → Edit → Schedule.
-- **Notes feed** — `/api/v1/notes`, `/reader/notes`, `/feed/notes`,
-  `POST /notes` all 404. `/api/v1/feed` exists but rejects every type value
-  we've tried. Visit substack.com/notes and capture.
+- *(SOLVED — Notes are at `POST /comment/feed` for creating,
+  `GET /reader/feed` for the home feed, `GET /reader/feed/profile/{user_id}`
+  for a profile, `DELETE /comment/{id}` for deletion. See the "Notes"
+  section above.)*
 - **Per-post stats** — `/post/{id}/stats`, `/post-stats/{id}`,
   `/posts/{id}/stats`, `/publish-dashboard/post-stats?post_id=X`,
   POST `/post-stats` body `{post_id}` all 404. Stats tab on a sent post
