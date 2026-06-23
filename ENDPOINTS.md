@@ -430,21 +430,23 @@ haven't been identified. The fastest way to crack each:
 4. Strip the cookie + headers down to the minimum that still works
 5. PR the result here
 
-Currently unsolved:
+Currently unsolved (need targeted captures — pattern-guessing exhausted):
 
-- **Scheduling a post for a future date** — `/drafts/{id}/schedule`,
-  `/drafts/{id}/publish` with `post_date`, `PUT /drafts/{id}` with `post_date`
-  all 404. The web app's "Schedule" button must hit something else.
-- *(SOLVED — see `POST /api/v1/subscriber-stats` above)*
-- **Notes (post / read)** — `/notes`, `/reader/notes`, `/feed/notes` all 404.
-  `/api/v1/feed` exists but rejects `type=for-you|following|home|top` — valid
-  values unknown.
-- **Per-post stats** — `/post/{id}/stats`, `/post_management/stats` 404.
-  Publication-level stats are at `/publish-dashboard/summary{,-v2}` (✅).
-  Per-post breakdown endpoint is unknown.
+- **Scheduling a post for a future date** — `/drafts/{id}/schedule` doesn't
+  exist as GET, POST, or PUT. `/drafts/{id}/publish` with `post_date` 404s.
+  `PUT /drafts/{id}` with `post_date` returns "Post must be published to
+  change post date". The web app's "Schedule" button hits some unknown
+  path — capture it from drafts → Edit → Schedule.
+- **Notes feed** — `/api/v1/notes`, `/reader/notes`, `/feed/notes`,
+  `POST /notes` all 404. `/api/v1/feed` exists but rejects every type value
+  we've tried. Visit substack.com/notes and capture.
+- **Per-post stats** — `/post/{id}/stats`, `/post-stats/{id}`,
+  `/posts/{id}/stats`, `/publish-dashboard/post-stats?post_id=X`,
+  POST `/post-stats` body `{post_id}` all 404. Stats tab on a sent post
+  must hit something — capture from publish/posts → click any sent post
+  → "Stats" view.
 - **Image MULTIPART upload** — JSON+base64 works (`/api/v1/image`); multipart
-  to the same path 400s. The web app might use a different path for direct
-  upload.
+  to the same path 400s.
 
 ### Recently solved (kept as breadcrumbs)
 - **Subscribers list** → `POST /api/v1/subscriber-stats` (round 4 —
