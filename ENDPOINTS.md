@@ -1,13 +1,14 @@
 # Substack API Endpoints
 
-Every endpoint below has been classified:
-- ✅ **Verified** — tested with curl in 2026
+Every endpoint below is classified:
+- ✅ **Verified** — tested with curl in 2026, response structure documented
 - 🟡 **Reported** — documented in another client; not personally re-tested
-- ❓ **Inferred** — pattern-guess from related endpoints
+- ❓ **Inferred** — pattern-guess; no successful call observed
+- ❌ **Doesn't exist** — tested and confirmed 404; documented to save you the time
 
 Base hosts:
-- **`substack.com`** — account-wide endpoints (your profile, subscriptions, etc.)
-- **`{subdomain}.substack.com`** — publication-scoped endpoints (drafts, posts, subscribers)
+- **`substack.com`** — account-wide endpoints (your profile, settings, global feed)
+- **`{subdomain}.substack.com`** — publication-scoped endpoints (drafts, posts, tags)
 
 All endpoints require the [auth cookie](AUTH.md) unless marked otherwise.
 
@@ -17,7 +18,7 @@ All endpoints require the [auth cookie](AUTH.md) unless marked otherwise.
 
 ### ✅ `GET /api/v1/user/profile/self`
 **Host:** `substack.com`
-**Returns:** Your profile + every publication you can edit.
+**Returns:** Your profile + every publication you have a role on.
 
 ```json
 {
@@ -28,6 +29,7 @@ All endpoints require the [auth cookie](AUTH.md) unless marked otherwise.
   "bio": "...",
   "publicationUsers": [
     {
+      "id": 9902568,
       "publication": {
         "id": 99999,
         "name": "Your Newsletter",
@@ -41,51 +43,82 @@ All endpoints require the [auth cookie](AUTH.md) unless marked otherwise.
 }
 ```
 
-**Use for:** validating a cookie + discovering owned publications. This is the
-single most useful endpoint for any tool integrating with Substack.
+**Use for:** validating a cookie + discovering owned publications. Single most
+useful endpoint in this surface. The `publicationUsers[].id` is your
+**publicationUserId** — required when creating drafts (as the byline reference).
+
+### ✅ `GET /api/v1/settings`
+**Host:** `substack.com`
+**Returns:** Account-level settings (notifications, defaults, etc.).
 
 ### ✅ `GET /api/v1/subscriptions?tvOnly=false`
 **Host:** `substack.com` or any pub subdomain
-**Returns:** Publications you're subscribed to (not owned).
+**Returns:** Publications you're SUBSCRIBED to (NOT owned — use
+`/user/profile/self` for owned).
 **Required query:** `tvOnly` (`false` works) — endpoint 400s without it.
 
 ```json
 {
   "subscriptions": [...],
   "publications": [
-    { "id": 2309986, "name": "Some Newsletter", "subdomain": "somenewsletter", ... }
+    { "id": 2309986, "name": "...", "subdomain": "...", ... }
   ]
 }
 ```
+
+### ✅ `GET /api/v1/reader/posts`
+**Host:** `substack.com`
+**Returns:** Global reader feed — posts from across publications the user can
+see, paginated.
+
+### ✅ `GET /api/v1/categories`
+**Host:** `substack.com`
+**Returns:** All publication categories (Culture, Tech, etc.). Public — no auth
+needed.
 
 ---
 
 ## Drafts (publication-scoped)
 
-All draft endpoints live on the publication's subdomain. Requires admin/editor
-role on that pub — otherwise returns `403 Not authorized`.
+All draft endpoints require admin/editor role on the pub. Returns
+`403 Not authorized` if you're just a subscriber.
+
+### ✅ `GET /api/v1/drafts?limit=N`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Array of draft objects. Use as a "do I have edit access" probe.
+
+### ✅ `GET /api/v1/drafts/{id}`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Single draft with full content + metadata.
 
 ### ✅ `POST /api/v1/drafts`
 **Host:** `{subdomain}.substack.com`
-**Body:**
+**Required body:**
 ```json
 {
   "draft_title": "...",
   "draft_subtitle": "...",
-  "draft_body": "<p>HTML or Substack's content-block JSON</p>",
-  "type": "newsletter"
+  "draft_body": "<p>HTML or Substack block JSON</p>",
+  "type": "newsletter",
+  "draft_bylines": [
+    { "id": 12345, "publicationUserId": 9902568 }
+  ]
 }
 ```
-**Returns:** Created draft object with `id`, `slug`, etc.
+**Important:** `draft_bylines` is **required** (not optional as some docs claim).
+Get the IDs from `/user/profile/self` — `id` is your user id,
+`publicationUserId` is `publicationUsers[N].id` for the pub.
 
-### 🟡 `PUT /api/v1/drafts/{id}`
-**Host:** `{subdomain}.substack.com`
-**Body:** Same as POST. Updates the draft in place — useful for "replace
-existing draft" flows that preserve the draft URL.
+**Returns:** Created draft with `id`, `draft_title`, `draft_body`, etc.
 
-### 🟡 `DELETE /api/v1/drafts/{id}`
+### ✅ `PUT /api/v1/drafts/{id}`
 **Host:** `{subdomain}.substack.com`
-**Returns:** `204` on success, `404` if already gone.
+**Body:** Same shape as POST. Updates in place — useful for "replace existing
+draft" flows that preserve the draft URL in the editor's inbox.
+
+### ✅ `DELETE /api/v1/drafts/{id}`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `200` on success. `404` if already gone.
 
 ### ✅ `PUT /api/v1/drafts/{id}/publish`
 **Host:** `{subdomain}.substack.com`
@@ -96,126 +129,170 @@ existing draft" flows that preserve the draft URL.
   "share_automatically": false
 }
 ```
-**Returns:** Published post object with `slug`. Email goes out to subscribers
-when `send: true`.
+**Returns:** Published post with `slug`. `send: true` emails subscribers
+immediately — **IRREVERSIBLE**.
 
-### ✅ `GET /api/v1/drafts?limit=N`
+### 🟡 `PUT /api/v1/drafts/{id}/prepublish`
 **Host:** `{subdomain}.substack.com`
-**Returns:** Array of draft objects. `403` if you don't have edit access —
-useful as an "is the user actually an admin here" probe.
+**Reported by:** ma2za/python-substack
+**Use:** Pre-flight check before publishing — returns validation issues without
+publishing.
+
+### 🟡 `PUT /api/v1/drafts/{id}/schedule`
+**Host:** `{subdomain}.substack.com`
+**Body:** `{ "post_date": "<ISO datetime>" }` to schedule. `{ "post_date": null }`
+to unschedule.
 
 ---
 
-## Posts (read-only)
+## Posts (publication-scoped, admin views)
 
 ### ✅ `GET /api/v1/posts?limit=N&offset=N`
 **Host:** `{subdomain}.substack.com`
-**Public** — no auth required for public posts. Returns published-post
-listings for browsing.
+**Public** — no auth required for public posts. Returns published-post listings
+for browsing.
+
+### ✅ `GET /api/v1/post_management/published`
+**Host:** `{subdomain}.substack.com`
+**Required query params:** `offset`, `limit`. Optional: `order_by`
+(`post_date`), `order_direction` (`desc`/`asc`).
+**Returns:** `{ posts, offset, limit, total, isCapped }`. Admin view with
+engagement context.
+
+### 🟡 `GET /api/v1/post_management/scheduled`
+**Host:** `{subdomain}.substack.com`
+**Required query params:** Same as `published`.
+**Returns:** Scheduled-but-not-yet-sent posts.
 
 ### 🟡 `GET /api/v1/posts/{slug}`
 **Host:** `{subdomain}.substack.com`
-**Returns:** Single post by slug, including content. Auth required for
+**Returns:** Single post by slug, with content. Auth required for
 subscriber-only posts.
-
-### 🟡 `GET /api/v1/post_management/published`
-**Host:** `{subdomain}.substack.com`
-**Returns:** Admin view of published posts with engagement metrics.
-Query params: `offset`, `limit`, `order_by` (`post_date`), `order_direction`
-(`asc`/`desc`).
 
 ---
 
 ## Publication settings
 
-### 🟡 `GET /api/v1/publication/users`
+### ✅ `GET /api/v1/publication/users`
 **Host:** `{subdomain}.substack.com`
 **Returns:** Users with roles on this publication (admins, editors).
 
-### 🟡 `GET /api/v1/subscribers`
+### ✅ `GET /api/v1/publication/post-tag`
 **Host:** `{subdomain}.substack.com`
-**Returns:** Paginated subscriber list. Admin-only.
+**Returns:** Array of post tags configured for the publication.
 
-### 🟡 `GET /api/v1/settings`
-**Host:** `substack.com`
-**Returns:** Account-level settings (notifications, etc.).
+### 🟡 `POST /api/v1/publication/post-tag`
+**Host:** `{subdomain}.substack.com`
+**Body:** `{ name: "..." }` — create a new tag.
+
+### 🟡 `POST /api/v1/post/{post_id}/tag/{tag_id}`
+**Host:** `{subdomain}.substack.com`
+**Use:** Attach a tag to a post.
+
+### ✅ `GET /api/v1/publication_launch_checklist`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Onboarding checklist state (about_page completed, first_post
+sent, etc.).
+
+### 🟡 `POST /api/v1/image`
+**Host:** `{subdomain}.substack.com`
+**Body:** Multipart with image file. Returns hosted URL for use in drafts.
 
 ---
 
-## Notes (Substack's micro-blogging surface)
+## Categories
 
-### 🟡 `GET /api/v1/notes?cursor=...`
+### 🟡 `GET /api/v1/category/public/{category_id}/{category_type}`
 **Host:** `substack.com`
-**Returns:** Notes feed. Cursor-based pagination.
-
-### ❓ `POST /api/v1/notes`
-**Host:** `substack.com`
-**Body:** `{ bodyJson: { ... }, replyMinimumRole: "everyone" }` (inferred)
-**Note:** Substack's note body is a structured JSON tree (block-based), not
-plain HTML. Format borrowed from their editor's content model.
+**Returns:** Publications in a specific category.
 
 ---
 
-## Common 404 traps
+## Endpoints that DON'T exist (don't waste your time)
 
-Endpoints that LOOK like they should exist but don't (verified absent against
-substack.com root):
+These returned 404 (HTML page) against the live API. Most public references
+that list them are wrong — they probably worked in an earlier Substack version.
 
-- ❌ `/api/v1/me`
-- ❌ `/api/v1/account`
-- ❌ `/api/v1/profile`
-- ❌ `/api/v1/users/me`
-- ❌ `/api/v1/reader/inbox`
+- ❌ `GET /api/v1/me`
+- ❌ `GET /api/v1/account`
+- ❌ `GET /api/v1/account/me`
+- ❌ `GET /api/v1/profile`
+- ❌ `GET /api/v1/users/me`
+- ❌ `GET /api/v1/reader/inbox`
+- ❌ `GET /api/v1/notes` (might exist scoped differently; not at this path)
+- ❌ `GET /api/v1/comments`
+- ❌ `GET /api/v1/contacts`
+- ❌ `GET /api/v1/free_subscribers`
+- ❌ `GET /api/v1/subscribers` (per-pub or root — both 404 / 403)
+- ❌ `GET /api/v1/post_management/draft`
+- ❌ `GET /api/v1/post_management/stats`
+- ❌ `GET /api/v1/stats`
 
-These all return Substack's 404 HTML page. Use `/api/v1/user/profile/self`
-instead.
+Use `/api/v1/user/profile/self` for "current user" info, not the variants above.
+
+## The 403 "Not authorized" cases
+
+These exist but return 403 even with a valid cookie:
+
+- 🔒 `GET /api/v1/admin/profile`
+- 🔒 `GET /api/v1/admin/publications`
+- 🔒 `GET /api/v1/user/profile` (note: WITHOUT `/self`)
+- 🔒 `GET /api/v1/user/me`
+- 🔒 `GET /api/v1/publication` (without ID)
+- 🔒 `GET /api/v1/publication/subscriptions` (likely needs Pro plan or higher
+  permission tier)
+
+These probably require publication-context that Substack derives from
+something we haven't found yet (CSRF token, X-header, internal IP allowlist).
+PRs welcome if you crack any.
 
 ## Headers cheatsheet
 
 ```
-Cookie: connect.sid=...; substack.sid=...     # auth
-User-Agent: Mozilla/5.0                       # default Node/curl UAs often 403
-Content-Type: application/json                # for POST/PUT
+Cookie: connect.sid=...; substack.sid=...    # auth
+User-Agent: Mozilla/5.0                      # default Node/Python UAs often 403
+Content-Type: application/json               # for POST/PUT
 Accept: application/json
 ```
 
-Most endpoints **don't** require:
-- `Origin` / `Referer` headers (CORS isn't enforced server-side for these)
-- CSRF tokens (cookie-only auth is accepted on all data endpoints)
+Most data endpoints **don't** require:
+- `Origin` / `Referer` headers
+- CSRF tokens
 - `X-Requested-With` headers
 
-The `/admin/*` and `/user/profile` paths that 403 with just a cookie probably
-need a publication-context that Substack derives from the subdomain. Try the
-same path on a `{sub}.substack.com` host before assuming auth is the issue.
+The `/admin/*` paths that 403 might need something more — see the 403 section
+above.
 
 ## Pagination
 
-Most list endpoints use:
+Mixed conventions across the surface:
 - `limit` (often capped at 100)
-- `offset` (zero-indexed) — for offset-based endpoints
-- `cursor` — for cursor-based endpoints like `/notes`
+- `offset` (zero-indexed)
+- `cursor` (for cursor-based endpoints)
 
-Mix is inconsistent across the surface; check the response for `next_cursor`
-or `total` fields.
+Check the response for `total`, `isCapped`, or `next_cursor` fields.
 
-## Errors
+## Error reference
 
-| Status | What it usually means |
+| Status | Meaning |
 |---|---|
 | `200` | Success |
 | `204` | Success, empty body (deletes) |
-| `400` | Bad request — usually missing required query param. Body lists which param. |
+| `400` | Bad request — body lists which param is invalid/missing |
 | `401` | Cookie missing or expired |
 | `403` | Cookie valid but you lack permission for this resource |
-| `404` | Endpoint or resource doesn't exist. Substack returns HTML, not JSON. |
-| `409` | Conflict — usually a name uniqueness violation (campaign/draft titles) |
+| `404` (HTML) | Endpoint or resource doesn't exist |
+| `404` (JSON `{error: "User not found"}`) | Resource exists but you can't see it |
+| `409` | Conflict — name uniqueness violation (rare) |
 | `429` | Rate limited — back off and retry |
+| `500` | Substack internal — usually transient |
 
 ## Contributing
 
-Find a new endpoint? Verify it with curl, then PR with:
+Find a new endpoint? Test with curl, then PR with:
 - Method + path
 - Required host (`substack.com` vs `{sub}.substack.com`)
 - Required headers / query params
-- Sample response (sanitize any user data)
+- Sample response (sanitize user data)
 - Classification (✅ / 🟡 / ❓)
+- Date you verified it
