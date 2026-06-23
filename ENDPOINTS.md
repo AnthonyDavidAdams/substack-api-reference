@@ -132,16 +132,19 @@ draft" flows that preserve the draft URL in the editor's inbox.
 **Returns:** Published post with `slug`. `send: true` emails subscribers
 immediately — **IRREVERSIBLE**.
 
-### 🟡 `PUT /api/v1/drafts/{id}/prepublish`
+### ✅ `GET /api/v1/drafts/{id}/prepublish`
 **Host:** `{subdomain}.substack.com`
-**Reported by:** ma2za/python-substack
-**Use:** Pre-flight check before publishing — returns validation issues without
-publishing.
+**Returns:** `{ errors: [...], suggestions: [...] }` — pre-flight check for the
+draft. Empty arrays = ready to publish. Use this before calling `/publish` to
+warn the editor of missing-image / unsubscribe / spam-trigger issues.
 
-### 🟡 `PUT /api/v1/drafts/{id}/schedule`
-**Host:** `{subdomain}.substack.com`
-**Body:** `{ "post_date": "<ISO datetime>" }` to schedule. `{ "post_date": null }`
-to unschedule.
+**Note:** The verb is **GET**, not PUT/POST as some older clients say.
+
+### ❌ `PUT /api/v1/drafts/{id}/schedule` (DOES NOT EXIST)
+**Confirmed 404** at `/api/v1/drafts/{id}/schedule` for POST, PUT. Scheduling
+via the publish endpoint with `post_date` ALSO 404s. The web app's scheduling
+flow uses a different mechanism we haven't reverse-engineered yet — likely a
+non-`/api/v1/*` path. Open question.
 
 ---
 
@@ -159,15 +162,22 @@ for browsing.
 **Returns:** `{ posts, offset, limit, total, isCapped }`. Admin view with
 engagement context.
 
-### 🟡 `GET /api/v1/post_management/scheduled`
+### ✅ `GET /api/v1/post_management/scheduled`
 **Host:** `{subdomain}.substack.com`
-**Required query params:** Same as `published`.
-**Returns:** Scheduled-but-not-yet-sent posts.
+**Required query:** `offset`, `limit`, `order_by=draft_updated_at`,
+`order_direction=desc`.
+**Important:** Unlike `/published`, `order_by` only accepts `draft_updated_at`
+(NOT `post_date`). Returns same `{posts, offset, limit, total, isCapped}` shape.
 
-### 🟡 `GET /api/v1/posts/{slug}`
-**Host:** `{subdomain}.substack.com`
-**Returns:** Single post by slug, with content. Auth required for
-subscriber-only posts.
+### ✅ `GET /api/v1/posts/by-id/{post_id}`
+**Host:** `{subdomain}.substack.com` (use the pub's actual host — custom
+domain or `{sub}.substack.com`)
+**Returns:** `{ post: {...} }` — single post with full content. Works for
+public + auth'd-subscriber posts.
+
+### ❌ `GET /api/v1/posts/{slug}` (DOES NOT EXIST)
+The slug-based lookup variant 404s. Use `/posts/by-id/{post_id}` instead;
+post IDs are returned in every list endpoint.
 
 ---
 
@@ -181,9 +191,15 @@ subscriber-only posts.
 **Host:** `{subdomain}.substack.com`
 **Returns:** Array of post tags configured for the publication.
 
-### 🟡 `POST /api/v1/publication/post-tag`
+### ✅ `POST /api/v1/publication/post-tag`
 **Host:** `{subdomain}.substack.com`
-**Body:** `{ name: "..." }` — create a new tag.
+**Body:** `{ "name": "..." }` — create a new tag.
+**Returns:** `{ id: "<uuid>", publication_id, slug, name, hidden }`. Note that
+tag IDs are UUIDs, not integers.
+
+### ✅ `DELETE /api/v1/publication/post-tag/{id}`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `200 {}` on success.
 
 ### 🟡 `POST /api/v1/post/{post_id}/tag/{tag_id}`
 **Host:** `{subdomain}.substack.com`
@@ -194,17 +210,25 @@ subscriber-only posts.
 **Returns:** Onboarding checklist state (about_page completed, first_post
 sent, etc.).
 
-### 🟡 `POST /api/v1/image`
+### ✅ `POST /api/v1/image`
 **Host:** `{subdomain}.substack.com`
-**Body:** Multipart with image file. Returns hosted URL for use in drafts.
+**Body (JSON):** `{ "image": "data:image/png;base64,<base64-encoded-bytes>" }`
+**Returns:** `{ id, url, contentType, bytes_required, width, height, ... }`
+where `url` is an S3-hosted CDN URL safe to use in drafts/posts.
+
+**Important:** This endpoint takes a **base64 data URI as JSON**, NOT a
+multipart upload. Multipart returns 400 `"Invalid value"`. Some older clients
+have this wrong.
 
 ---
 
 ## Categories
 
-### 🟡 `GET /api/v1/category/public/{category_id}/{category_type}`
+### ✅ `GET /api/v1/category/public/{category_id}/{category_type}`
 **Host:** `substack.com`
-**Returns:** Publications in a specific category.
+**Returns:** `{ publications: [...] }` — publications in a category.
+**`category_type` accepts:** `all`, `top`, `new`. Get category IDs from
+`/api/v1/categories`.
 
 ---
 
@@ -286,6 +310,33 @@ Check the response for `total`, `isCapped`, or `next_cursor` fields.
 | `409` | Conflict — name uniqueness violation (rare) |
 | `429` | Rate limited — back off and retry |
 | `500` | Substack internal — usually transient |
+
+## Open questions (PRs welcome)
+
+These exist as features in the Substack web app but the endpoint paths
+haven't been identified. The fastest way to crack each:
+
+1. Open Substack in Chrome, F12 → Network tab, filter to **Fetch/XHR**
+2. Perform the action in the UI
+3. The matching request appears in Network — right-click → **Copy as cURL**
+4. Strip the cookie + headers down to the minimum that still works
+5. PR the result here
+
+Currently unsolved:
+
+- **Scheduling a post for a future date** — `/drafts/{id}/schedule`,
+  `/drafts/{id}/publish` with `post_date`, `PUT /drafts/{id}` with `post_date`
+  all 404. The web app's "Schedule" button must hit something else.
+- **Subscriber list** — `/subscribers`, `/contacts`, `/publication/subscribers/*`
+  all 404 or 403. The Subscribers tab in pub admin works in the UI; the API path
+  is hidden behind something stricter.
+- **Notes (post / read)** — `/notes`, `/reader/notes`, `/feed/notes` all 404.
+  The notes feed exists in the app at substack.com/notes; endpoint shape unknown.
+- **Stats / analytics** — `/post/{id}/stats`, `/post_management/stats` 404.
+  The Stats tab pulls from somewhere.
+- **Image MULTIPART upload** — JSON+base64 works (`/api/v1/image`); multipart
+  to the same path 400s. The web app might use a different path for direct
+  upload.
 
 ## Contributing
 
