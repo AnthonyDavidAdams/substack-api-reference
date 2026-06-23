@@ -181,6 +181,55 @@ post IDs are returned in every list endpoint.
 
 ---
 
+## Stats & analytics
+
+### ✅ `GET /api/v1/publish-dashboard/summary`
+**Host:** `{subdomain}.substack.com`
+**Returns:** All-time publication stats.
+```json
+{
+  "subscribers": 1234,
+  "appSubscribers": 87,
+  "appSubscribersLast30Days": 12,
+  "totalEmail": 45000,
+  "openRate": 32.4,
+  "pledgesAmount": 0,
+  "numPledges": 0,
+  "pledgeCurrency": "usd",
+  "isBestseller": false
+}
+```
+Includes **open rate** — the single most useful publication-level metric for
+editorial feedback loops.
+
+### ✅ `GET /api/v1/publish-dashboard/summary-v2?range={N}`
+**Host:** `{subdomain}.substack.com`
+**Query:** `range` accepts integer day counts. Verified: `7`, `30`, `365`.
+**Returns:** Start/end snapshot for the window.
+```json
+{
+  "totalSubscribersStart": 1200, "totalSubscribersEnd": 1234,
+  "paidSubscribersStart": 45, "paidSubscribersEnd": 47,
+  "arrStart": 5400, "arrEnd": 5640,
+  "totalViewsStart": 0, "totalViewsEnd": 0,
+  "pledgedArrStart": 0, "pledgedArrEnd": 0
+}
+```
+Use to compute deltas: subs added, ARR change, etc. over the window.
+
+---
+
+## Live streams
+
+### ✅ `GET /api/v1/live_streams`
+**Host:** `{subdomain}.substack.com`
+**Query:** `status` (`scheduled` / `live` / `ended`), `stream_type`
+(`rtmp_only` / others)
+**Returns:** `{ liveStreams: [...], hasMore: boolean }`. Empty array for
+pubs with no live streams.
+
+---
+
 ## Publication settings
 
 ### ✅ `GET /api/v1/publication/users`
@@ -331,12 +380,19 @@ Currently unsolved:
   all 404 or 403. The Subscribers tab in pub admin works in the UI; the API path
   is hidden behind something stricter.
 - **Notes (post / read)** — `/notes`, `/reader/notes`, `/feed/notes` all 404.
-  The notes feed exists in the app at substack.com/notes; endpoint shape unknown.
-- **Stats / analytics** — `/post/{id}/stats`, `/post_management/stats` 404.
-  The Stats tab pulls from somewhere.
+  `/api/v1/feed` exists but rejects `type=for-you|following|home|top` — valid
+  values unknown.
+- **Per-post stats** — `/post/{id}/stats`, `/post_management/stats` 404.
+  Publication-level stats are at `/publish-dashboard/summary{,-v2}` (✅).
+  Per-post breakdown endpoint is unknown.
 - **Image MULTIPART upload** — JSON+base64 works (`/api/v1/image`); multipart
   to the same path 400s. The web app might use a different path for direct
   upload.
+
+### Recently solved (kept as breadcrumbs)
+- **Publication-level stats** → `/api/v1/publish-dashboard/summary` and
+  `/publish-dashboard/summary-v2?range={N}` (round 3 — captured via
+  Substack admin → publish/home dashboard)
 
 ## Contributing
 
