@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Endpoints](https://img.shields.io/badge/Endpoints-129%20verified-brightgreen)
 ![Rounds](https://img.shields.io/badge/Capture%20rounds-14-blue)
+![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-orange)
 
 A practical, verified reference for Substack's undocumented internal API. Every endpoint here has been tested against the live API. Designed for humans **and** for AI agents (see [`SKILL.md`](SKILL.md)).
 
@@ -50,10 +51,31 @@ curl -X POST \
 ## Contents
 
 - [`ENDPOINTS.md`](ENDPOINTS.md) — every verified endpoint with body shapes, query params, and sample responses
+- [`openapi.yaml`](openapi.yaml) — **OpenAPI 3.1 spec** (125 operations, 51 schemas) — scaffold a typed client in any language
 - [`AUTH.md`](AUTH.md) — getting the cookie, format, rotation, sending it from server-side code
 - [`SKILL.md`](SKILL.md) — Claude Agent SDK skill manifest
 - [`examples/curl/`](examples/curl) — drop-in curl scripts
 - [`examples/typescript/`](examples/typescript) — minimal typed client
+
+### Generate a typed client from `openapi.yaml`
+
+Drop-in commands for popular generators:
+
+```bash
+# TypeScript fetch client
+npx openapi-typescript openapi.yaml -o substack-types.ts
+
+# TypeScript axios/full SDK
+npx @openapitools/openapi-generator-cli generate -i openapi.yaml -g typescript-axios -o ./sdk-ts
+
+# Python SDK
+npx @openapitools/openapi-generator-cli generate -i openapi.yaml -g python -o ./sdk-py
+
+# Go SDK
+npx @openapitools/openapi-generator-cli generate -i openapi.yaml -g go -o ./sdk-go
+```
+
+Substack's endpoints split across two host families (account + per-pub) and the spec models both as `servers` — set `subdomain` when configuring the client.
 
 ---
 

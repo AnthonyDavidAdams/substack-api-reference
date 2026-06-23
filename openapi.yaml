@@ -1,0 +1,2906 @@
+openapi: 3.1.0
+
+info:
+  title: Substack API (Unofficial)
+  version: 0.14.0
+  summary: Reverse-engineered reference for Substack's undocumented internal JSON API.
+  description: |
+    **Unofficial.** Substack does not publish or support this API. Endpoints can
+    change without notice. This spec is generated from the live web app's
+    network traffic across 14 capture rounds and is intended as a working
+    notebook, not a contract.
+
+    ## Hosts
+
+    Substack uses two host families:
+
+    - **Account host** (`https://substack.com`) — for account-wide endpoints
+      (your profile, settings, global feed, blocks, DMs).
+    - **Publication host** (`https://{subdomain}.substack.com`) — for
+      publication-scoped endpoints (drafts, posts, tags, subscribers, threads,
+      stats, recommendations).
+
+    Some endpoints are gated on one host but open on the other (notably
+    `GET /api/v1/publication` — 403 from account host, 200 from publication
+    host). When in doubt, try both.
+
+    ## Authentication
+
+    Session cookies, the same ones the web app sets. There is no OAuth or API
+    key program. Send `connect.sid` (current) or `substack.sid` (older) — or
+    both. Cookies are valid for months unless you sign out.
+
+    ## Source
+
+    https://github.com/AnthonyDavidAdams/substack-api-reference
+  license:
+    name: MIT
+    url: https://github.com/AnthonyDavidAdams/substack-api-reference/blob/main/LICENSE
+  contact:
+    name: Anthony David Adams
+    url: https://earthpilot.co/play
+
+servers:
+  - url: https://substack.com
+    description: Account host (account-wide endpoints — profile, inbox, blocks, search)
+  - url: https://{subdomain}.substack.com
+    description: Publication host (publication-scoped endpoints — drafts, posts, subscribers, threads, stats)
+    variables:
+      subdomain:
+        default: yourpublication
+        description: Your Substack publication subdomain (the part before `.substack.com`)
+
+security:
+  - cookieAuth: []
+
+tags:
+  - name: Account
+    description: Profile, account-level info, blocks, public profile
+  - name: Auth
+    description: Login (magic link, legacy password)
+  - name: Activity
+    description: Activity feed, realtime tokens
+  - name: Publications
+    description: Publication CRUD, settings, sections, exports, recommendations from this pub
+  - name: Drafts
+    description: Draft create, update, delete, publish, schedule, prepublish
+  - name: Posts
+    description: Published posts, post management, per-post stats, themes
+  - name: Notes
+    description: Substack Notes — create, list, profile feed, home feed, seen
+  - name: Comments
+    description: Reader comments on posts, comment reactions, moderation
+  - name: Reactions
+    description: Reaction catalog and post-level reactions (like/unreact)
+  - name: Subscribers
+    description: Subscriber list, add, remove, import status, paged subscriptions
+  - name: Recommendations
+    description: Cross-publication recommendations (add/remove/list/suggested/edge-check)
+  - name: Messages
+    description: DMs between writers (inbox, unread count)
+  - name: Stats
+    description: Publication-level and per-post analytics
+  - name: Growth
+    description: Growth sources, events, suggestions
+  - name: Chat
+    description: Substack Chat (publication threads) — enable, send, delete, list
+  - name: Media
+    description: Image upload, audio/podcast upload (S3 presigned multipart)
+  - name: LiveStreams
+    description: Live video streams
+  - name: CrossPosting
+    description: YouTube and LinkedIn cross-post auth
+  - name: UserSettings
+    description: Per-user key-value settings
+  - name: Search
+    description: Global publication / post search
+  - name: ReaderFeed
+    description: Inbox, reader feed, tabs, subscriptions
+  - name: Notifications
+    description: Notification settings, comment moderation reasons
+  - name: Tags
+    description: Per-post tags, publication-level discovery tags
+  - name: Telemetry
+    description: Client-side analytics batch (firehose) — documented to identify, not to use
+
+components:
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: connect.sid
+      description: |
+        Substack uses session cookies. Send `connect.sid` (current) or
+        `substack.sid` (older), or both. The value is URL-encoded by the
+        server (`s%3A...` prefix when encoded). Cookies are valid for months.
+
+  schemas:
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        type:
+          type: string
+          enum: [single]
+      required: [error]
+
+    FieldErrors:
+      type: object
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              location:
+                type: string
+                enum: [body, query]
+              param:
+                type: string
+              msg:
+                type: string
+              value:
+                type: string
+            required: [param, msg]
+      required: [errors]
+
+    UserProfileSelf:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: The numeric user id
+        name:
+          type: string
+        handle:
+          type: string
+        photo_url:
+          type: string
+        bio:
+          type: string
+        publicationUsers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicationUser'
+
+    PublicationUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: The `publicationUserId` — required as byline reference when creating drafts.
+        publication:
+          $ref: '#/components/schemas/PublicationSummary'
+        role:
+          type: string
+          enum: [admin, editor, owner]
+        is_primary:
+          type: boolean
+
+    PublicationSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        subdomain:
+          type: string
+        logo_url:
+          type: string
+
+    Publication:
+      type: object
+      properties:
+        id:
+          type: integer
+        subdomain:
+          type: string
+        name:
+          type: string
+        is_personal_mode:
+          type: boolean
+        custom_domain:
+          type: string
+          nullable: true
+        logo_url:
+          type: string
+        hero_text:
+          type: string
+        language:
+          type: string
+          description: ISO 639-1 (e.g. `en`, `es`)
+        welcome_email_content:
+          type: string
+          description: |
+            Stringified ProseMirror document (the doc shape
+            `{type:"doc", content:[...]}` encoded as a single JSON string,
+            **not** a nested object).
+        welcome_email_subject:
+          type: string
+
+    PublicationUpdate:
+      type: object
+      description: |
+        Partial publication. The web UI saves **one field per call** — clicking
+        Save on a specific field sends only that field, not the whole object.
+        Confirmed writable fields: `name`, `hero_text`, `language`,
+        `welcome_email_content`. Other fields from the GET response are likely
+        accepted (logo_url, custom_domain, ...) but unconfirmed.
+      properties:
+        name:
+          type: string
+        hero_text:
+          type: string
+        language:
+          type: string
+        welcome_email_content:
+          type: string
+        welcome_email_subject:
+          type: string
+        logo_url:
+          type: string
+        custom_domain:
+          type: string
+
+    PublicationSettings:
+      type: object
+      description: |
+        Flat key-value map of boolean toggles and a few non-boolean values.
+        Distinct from the publication object itself (which holds name/logo/etc).
+      additionalProperties: true
+      properties:
+        high_res_recording_beta:
+          type: boolean
+
+    Section:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        slug:
+          type: string
+
+    PostTag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        publication_id:
+          type: integer
+        name:
+          type: string
+        slug:
+          type: string
+        hidden:
+          type: boolean
+
+    PostTagWithNav:
+      allOf:
+        - $ref: '#/components/schemas/PostTag'
+        - type: object
+          properties:
+            navigationBarItem:
+              type: object
+              nullable: true
+
+    CategoryTag:
+      type: object
+      description: Publication-level discovery category tags (different from per-post tags).
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        canonical_name:
+          type: string
+        active:
+          type: boolean
+        parent_tag_id:
+          type: integer
+          nullable: true
+
+    DraftBody:
+      description: |
+        ProseMirror/TipTap document (preferred for new content), or an HTML
+        string (web UI accepts both).
+      oneOf:
+        - type: string
+          description: HTML or stringified JSON.
+        - type: object
+
+    Draft:
+      type: object
+      properties:
+        id:
+          type: integer
+        draft_title:
+          type: string
+        draft_subtitle:
+          type: string
+        draft_body:
+          $ref: '#/components/schemas/DraftBody'
+        draft_podcast_url:
+          type: string
+          nullable: true
+        draft_podcast_duration:
+          type: number
+          nullable: true
+        type:
+          type: string
+          enum: [newsletter, podcast, thread, video]
+        draft_bylines:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                description: Numeric user id (from `/user/profile/self`).
+              publicationUserId:
+                type: integer
+                description: "`publicationUsers[N].id` for this pub."
+
+    DraftCreate:
+      type: object
+      required: [draft_title, draft_body, type, draft_bylines]
+      properties:
+        draft_title:
+          type: string
+        draft_subtitle:
+          type: string
+        draft_body:
+          $ref: '#/components/schemas/DraftBody'
+        type:
+          type: string
+          enum: [newsletter, podcast, thread, video]
+        draft_bylines:
+          type: array
+          items:
+            type: object
+            required: [id, publicationUserId]
+            properties:
+              id:
+                type: integer
+              publicationUserId:
+                type: integer
+
+    PublishRequest:
+      type: object
+      required: [send]
+      properties:
+        send:
+          type: boolean
+          description: If `true`, emails subscribers immediately (irreversible).
+        share_automatically:
+          type: boolean
+
+    ScheduledRelease:
+      type: object
+      required: [trigger_at]
+      properties:
+        trigger_at:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp. The field name is **`trigger_at`** —
+            NOT `post_date`, `publish_date`, or `scheduled_at`.
+        post_audience:
+          type: string
+          enum: [everyone, subscribers_only, paid_subscribers_only]
+
+    PostManagementList:
+      type: object
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Post'
+        offset:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        isCapped:
+          type: boolean
+
+    PostManagementCounts:
+      type: object
+      properties:
+        published:
+          type: integer
+        publishedIsCapped:
+          type: boolean
+        drafts:
+          type: integer
+        draftsIsCapped:
+          type: boolean
+        scheduled:
+          type: integer
+        scheduledIsCapped:
+          type: boolean
+
+    Post:
+      type: object
+      description: Published post. ~80 fields total in the full payload.
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        subtitle:
+          type: string
+        slug:
+          type: string
+        publication_id:
+          type: integer
+        type:
+          type: string
+        audience:
+          type: string
+        is_published:
+          type: boolean
+        post_date:
+          type: string
+          format: date-time
+        postTags:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostTag'
+
+    PostStats:
+      type: object
+      description: 31-field per-post engagement breakdown.
+      properties:
+        sent: { type: integer }
+        delivered: { type: integer }
+        opens: { type: integer, description: "Total opens incl. multiple per user" }
+        opened: { type: integer, description: "Unique users who opened" }
+        open_rate: { type: number, description: "opened / delivered" }
+        clicks: { type: integer }
+        clicked: { type: integer }
+        click_through_rate: { type: number }
+        engagement_rate: { type: number }
+        views: { type: integer }
+        shares: { type: integer }
+        signups: { type: integer }
+        subscribes: { type: integer }
+        signups_within_1_day: { type: integer }
+        subscriptions_within_1_day: { type: integer }
+        unsubscribes_within_1_day: { type: integer }
+        disables_within_1_day: { type: integer }
+        downloads: { type: integer }
+        downloads_day7: { type: integer }
+        downloads_day30: { type: integer }
+        downloads_day90: { type: integer }
+        podcast_preview_downloads: { type: integer }
+        podcast_preview_downloads_day30: { type: integer }
+        video_views: { type: integer }
+        video_minutes_watched: { type: integer }
+        estimated_value: { type: number }
+        firstWeekDailyStats:
+          type: array
+          items:
+            type: object
+        links:
+          type: array
+          items:
+            type: object
+        referrers:
+          type: object
+        comps:
+          type: object
+        has_more_links:
+          type: boolean
+
+    PublishDashboardSummary:
+      type: object
+      properties:
+        subscribers: { type: integer }
+        appSubscribers: { type: integer }
+        appSubscribersLast30Days: { type: integer }
+        totalEmail: { type: integer }
+        openRate: { type: number, description: "Publication-level open rate" }
+        pledgesAmount: { type: number }
+        numPledges: { type: integer }
+        pledgeCurrency: { type: string }
+        isBestseller: { type: boolean }
+
+    PublishDashboardSummaryV2:
+      type: object
+      properties:
+        totalSubscribersStart: { type: integer }
+        totalSubscribersEnd: { type: integer }
+        paidSubscribersStart: { type: integer }
+        paidSubscribersEnd: { type: integer }
+        arrStart: { type: number }
+        arrEnd: { type: number }
+        totalViewsStart: { type: integer }
+        totalViewsEnd: { type: integer }
+        pledgedArrStart: { type: number }
+        pledgedArrEnd: { type: number }
+
+    NetworkAttribution:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              publication_id: { type: integer }
+              time_window: { type: string }
+              is_subscribed: { type: boolean }
+              criteria: { type: integer }
+              label: { type: string }
+              subs_count: { type: integer }
+              pct_time_window_total: { type: number }
+              data_updated_at: { type: string, format: date-time }
+
+    EmailTimeseries:
+      type: array
+      description: Array of `[YYYY/MM/DD, count]` pairs.
+      items:
+        type: array
+        items:
+          oneOf:
+            - type: string
+            - type: integer
+
+    Subscriber:
+      type: object
+      properties:
+        user_id: { type: integer }
+        user_email_address: { type: string }
+        user_name: { type: string }
+        user_photo_url: { type: string, nullable: true }
+        subscription_id: { type: integer }
+        subscription_created_at: { type: string, format: date-time }
+        subscription_interval:
+          type: string
+          enum: [free, monthly, annual]
+        subscription_type:
+          type: string
+          nullable: true
+        is_subscribed: { type: boolean }
+        is_founding: { type: boolean }
+        is_free_trial: { type: boolean }
+        is_gift: { type: boolean }
+        is_comp: { type: boolean }
+        is_bitcoin: { type: boolean }
+        activity_rating: { type: integer }
+        total_revenue_generated: { type: number }
+        total_count: { type: integer }
+
+    SubscriberStatsRequest:
+      type: object
+      required: [filters, limit, offset]
+      properties:
+        filters:
+          type: object
+          properties:
+            order_by_desc_nulls_last:
+              type: string
+              description: |
+                Sort column. Verified values include `subscription_created_at`.
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    SubscriberStatsResponse:
+      type: object
+      properties:
+        count: { type: integer }
+        subscribers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subscriber'
+        pendingImports:
+          type: array
+          items: { type: object }
+        pendingCRMImportsCount: { type: integer }
+        order:
+          type: object
+          properties:
+            by: { type: string }
+            direction: { type: string, enum: [asc, desc] }
+        chartCounts:
+          type: object
+          additionalProperties: true
+        batchSubscriberActions:
+          type: array
+          items: { type: object }
+        lastSync: { type: string, format: date-time }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        body: { type: string }
+        body_json:
+          type: object
+          description: Parsed ProseMirror document tree.
+        deleted: { type: boolean }
+
+    CommentCreate:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          description: |
+            Plain text. Substack auto-converts to ProseMirror in storage.
+
+    NoteCreate:
+      type: object
+      required: [bodyJson]
+      properties:
+        bodyJson:
+          type: object
+          description: |
+            ProseMirror document tree. The simplest valid shape is
+            `{type:"doc", attrs:{schemaVersion:"v1", title:null},
+            content:[{type:"paragraph", content:[{type:"text", text:"..."}]}]}`.
+          required: [type, content]
+          properties:
+            type:
+              type: string
+              enum: [doc]
+            attrs:
+              type: object
+              properties:
+                schemaVersion: { type: string }
+                title:
+                  type: string
+                  nullable: true
+            content:
+              type: array
+              items:
+                type: object
+        replyMinimumRole:
+          type: string
+          enum: [everyone, free_subscriber, paid_subscriber, founding_member]
+
+    ReactionRequest:
+      type: object
+      required: [reaction, surface]
+      properties:
+        reaction:
+          type: string
+          description: |
+            The **literal emoji character** (e.g. `❤`, `👍`), NOT a named
+            reaction string. The Notes/threads reaction catalog
+            (`GET /threads/reactions`) returns named strings, but the wire
+            format for post reactions is the actual unicode character.
+        surface:
+          type: string
+          enum: [reader, editor, feed]
+
+    Recommendation:
+      type: object
+      properties:
+        recommended_publication_id: { type: integer }
+        recommending_publication_id: { type: integer }
+        source: { type: string }
+        suggested: { type: boolean }
+        note: { type: string }
+
+    RecommendationCreate:
+      type: object
+      required: [recommended_publication_id, recommending_publication_id, source]
+      properties:
+        recommended_publication_id: { type: integer }
+        recommending_publication_id: { type: integer }
+        source:
+          type: string
+          description: Click-origin tracking. Verified value `recommendation-stats`.
+        suggested: { type: boolean }
+        note: { type: string }
+
+    RecommendationDelete:
+      type: object
+      required: [recommended_publication_id, recommending_publication_id, source]
+      properties:
+        recommended_publication_id: { type: integer }
+        recommending_publication_id: { type: integer }
+        source: { type: string }
+
+    StripeAccountStatus:
+      type: object
+      properties:
+        account:
+          type: object
+          nullable: true
+        plans:
+          type: array
+          nullable: true
+          items: { type: object }
+
+    PledgePlans:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        payment_pledge_plans:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              amount:
+                type: integer
+                description: Amount in cents.
+              interval:
+                type: string
+                enum: [month, year]
+              currency: { type: string }
+
+    Thread:
+      type: object
+      description: Substack Chat "thread" (the `communityPost` shape).
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        user_id: { type: integer }
+        publication_id: { type: integer }
+        body: { type: string }
+        link_url:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [published, draft, scheduled, deleted]
+        type:
+          type: string
+          enum: [media, text, video, link]
+        audience:
+          type: string
+          enum: [all_subscribers, paid_subscribers, founding_members]
+        media_assets:
+          type: array
+          items: { type: object }
+        is_locked: { type: boolean }
+        pub_moderation_status:
+          type: string
+          nullable: true
+        trust_and_safety_status:
+          type: string
+          nullable: true
+        is_edited: { type: boolean }
+        comment_count: { type: integer }
+        max_comment_created_at:
+          type: string
+          format: date-time
+          nullable: true
+        reaction_count: { type: integer }
+
+    ThreadCreate:
+      type: object
+      required: [id, body, audience, type]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: |
+            **Client-generated UUID** (the server uses this as the canonical
+            thread id; not assigned server-side). Use for idempotency.
+        body: { type: string }
+        media_urls:
+          type: array
+          items: { type: string }
+        audience:
+          type: string
+          enum: [all_subscribers, paid_subscribers, founding_members]
+        type:
+          type: string
+          enum: [media, text, video, link]
+        send_email: { type: boolean }
+        send_push: { type: boolean }
+        link_url:
+          type: string
+          nullable: true
+
+    ThreadsSettings:
+      type: object
+      required: [threads_v2_enabled]
+      properties:
+        threads_v2_enabled:
+          type: boolean
+          description: Master toggle for Substack Chat on this publication.
+        create_thread_minimum_role:
+          type: string
+          enum: [everyone, free_subscriber, paid_subscriber, founding_member]
+        reader_thread_notifications_enabled:
+          type: boolean
+
+    ImageUploadRequest:
+      type: object
+      required: [image]
+      properties:
+        image:
+          type: string
+          description: |
+            Base64 data URI, e.g. `data:image/png;base64,<base64-bytes>`.
+            **Not** a multipart upload — multipart returns 400.
+
+    ImageUploadResponse:
+      type: object
+      properties:
+        id: { type: integer }
+        url:
+          type: string
+          description: S3-hosted CDN URL safe to use in drafts/posts.
+        contentType: { type: string }
+        bytes_required: { type: integer }
+        width: { type: integer }
+        height: { type: integer }
+
+    AudioUploadInit:
+      type: object
+      description: |
+        Empty body POST returns the multipart upload id and an S3 presigned
+        PUT URL. Audio uploads go to the `substack-video` bucket via the
+        `video_upload/post/{post_id}/{upload_id}/original` path — this is the
+        unified media store, not a typo.
+      additionalProperties: true
+
+    AudioTranscodeRequest:
+      type: object
+      required: [multipart_upload_id, multipart_upload_etags]
+      properties:
+        duration:
+          type: number
+          nullable: true
+          description: Duration in seconds. `null` is accepted (Substack measures during transcode).
+        multipart_upload_id:
+          type: string
+          description: Opaque token from the S3 presigned URL's `uploadId` query param.
+        multipart_upload_etags:
+          type: array
+          description: |
+            Array of S3-returned ETags for each part. **Preserve the
+            surrounding quote characters** that S3 returns (e.g.
+            `"\"7934201b4a7be4e377bca86ae28f0714\""`).
+          items:
+            type: string
+
+    InboxItems:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              entity_key:
+                type: string
+                description: |
+                  Routing prefix: `c-{comment_id}` for notes/comments,
+                  `p-{post_id}` for posts.
+              type: { type: string }
+              context:
+                type: object
+                properties:
+                  type: { type: string }
+                  typeBucket: { type: string }
+                  timestamp: { type: string, format: date-time }
+                  users:
+                    type: array
+                    items: { type: object }
+              users:
+                type: array
+                items: { type: object }
+
+    ReaderFeedTabs:
+      type: object
+      properties:
+        tabs:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              type: { type: string, enum: [base, secondary] }
+              layout: { type: string }
+              trackingParameters:
+                type: object
+
+    ThreadsReactions:
+      type: object
+      properties:
+        suggestedReactionTypes:
+          type: array
+          items: { type: string }
+        categories:
+          type: array
+          items:
+            type: object
+            properties:
+              title: { type: string }
+              reactionTypes:
+                type: array
+                items: { type: string }
+
+    DeleteReasons:
+      type: object
+      properties:
+        reasons:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              label: { type: string }
+
+    UserSettingUpdate:
+      type: object
+      required: [type]
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+          description: |
+            Setting key. Verified value:
+            `newest_seen_chat_item_published_at`.
+        value_datetime:
+          type: string
+          format: date-time
+        value_string:
+          type: string
+        value_bool:
+          type: boolean
+
+    PublicationCreate:
+      type: object
+      required: [name, subdomain, hero_text]
+      description: |
+        ⚠️ **Captcha-gated by design.** All three fields below validate, but
+        the final request also requires a captcha-solution token in the body
+        (Substack returns `{"error":"Please complete the captcha to continue"}`
+        otherwise). Not headlessly automatable with cookies alone.
+      properties:
+        name:
+          type: string
+        subdomain:
+          type: string
+        hero_text:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        offset: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        isCapped: { type: boolean }
+
+  parameters:
+    PaginationOffset:
+      name: offset
+      in: query
+      schema: { type: integer }
+    PaginationLimit:
+      name: limit
+      in: query
+      schema: { type: integer }
+    OrderBy:
+      name: order_by
+      in: query
+      schema: { type: string }
+    OrderDirection:
+      name: order_direction
+      in: query
+      schema: { type: string, enum: [asc, desc] }
+
+  responses:
+    Unauthorized:
+      description: Missing or expired cookie.
+      content:
+        text/html: {}
+    Forbidden:
+      description: Cookie valid but lacks permission for this resource.
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: Not authorized
+    NotFound:
+      description: Endpoint or resource doesn't exist.
+    BadRequest:
+      description: Validation error — body lists which param is invalid/missing.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/Error'
+              - $ref: '#/components/schemas/FieldErrors'
+    RateLimited:
+      description: Rate-limited. Back off and retry.
+
+paths:
+
+  /api/v1/user/profile/self:
+    get:
+      tags: [Account]
+      summary: Get your profile + every publication you have a role on
+      servers:
+        - url: https://substack.com
+      description: |
+        The single most useful endpoint in this surface. Use to validate a
+        cookie and discover owned publications. The
+        `publicationUsers[].id` is the **publicationUserId** — required as
+        the byline reference when creating drafts.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileSelf'
+
+  /api/v1/user/{user_id}-{handle}/public_profile/self:
+    get:
+      tags: [Account]
+      summary: Your public profile data
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: handle
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/blocks/ids:
+    get:
+      tags: [Account]
+      summary: List blocked user IDs
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: Flat array of user IDs you've blocked
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: integer }
+
+  /api/v1/settings:
+    get:
+      tags: [Account]
+      summary: Get account-level settings
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Account]
+      summary: Update an account-level setting (generic key-value setter)
+      servers:
+        - url: https://substack.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settingName, settingValue]
+              properties:
+                settingName: { type: string }
+                settingValue: {}
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/subscriptions:
+    get:
+      tags: [Subscribers]
+      summary: List publications the cookie holder is subscribed to (NOT owned)
+      description: |
+        For owned pubs use `/user/profile/self`.
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: tvOnly
+          in: query
+          required: true
+          description: Endpoint 400s without this param. `false` works.
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/subscriptions/page_v2:
+    get:
+      tags: [Subscribers, ReaderFeed]
+      summary: Paginated subscriptions
+      description: Use this in new code; the non-versioned `/subscriptions` is legacy.
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/subscriptions/top/v2:
+    get:
+      tags: [ReaderFeed]
+      summary: Top (most-engaged-with) subscriptions
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/subscription:
+    get:
+      tags: [Subscribers]
+      summary: The cookie holder's subscription to **this specific pub** (if any)
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/login:
+    post:
+      tags: [Auth]
+      summary: Legacy email+password login
+      servers:
+        - url: https://substack.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/email-login:
+    post:
+      tags: [Auth]
+      summary: Send a magic-link login email
+      servers:
+        - url: https://substack.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/activity/unread:
+    get:
+      tags: [Activity]
+      summary: Activity feed unread count
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  max:
+                    type: boolean
+                    description: When true, count is capped (display "99+").
+                  lastViewedAt: { type: string, format: date-time }
+
+  /api/v1/realtime/token:
+    get:
+      tags: [Activity]
+      summary: JWT for realtime/websocket subscriptions
+      description: |
+        JWT (`aud: zync`, includes permissions, short TTL ~1h). The web app
+        refreshes about every 60s.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+
+  /api/v1/categories:
+    get:
+      tags: [Tags]
+      summary: All publication categories (Culture, Tech, etc.)
+      description: Public — no auth needed.
+      security: []
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/category/public/{category_id}/{category_type}:
+    get:
+      tags: [Tags]
+      summary: Publications in a category
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: category_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: category_type
+          in: path
+          required: true
+          schema: { type: string, enum: [all, top, new] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publications:
+                    type: array
+                    items: { type: object }
+
+  /api/v1/publication:
+    get:
+      tags: [Publications]
+      summary: Get publication object (read companion to PUT)
+      description: |
+        ⚠️ **Host-specific.** 403 from `substack.com`; 200 from
+        `{subdomain}.substack.com`. Use the publication host.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Publication'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [Publications]
+      summary: Update publication (single-field partial update)
+      description: |
+        Empty body returns `{"error":"No valid publication parameters provided"}`.
+        The web UI saves **one field per Save click**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicationUpdate'
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Publications]
+      summary: Create a publication (captcha-gated)
+      servers:
+        - url: https://substack.com
+      description: |
+        ⚠️ **Captcha-gated.** Body must include `name`, `subdomain`, `hero_text`
+        plus a captcha-solution token. Substack returns
+        `{"error":"Please complete the captcha to continue"}` for body-only
+        requests. Not headlessly automatable with cookies alone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicationCreate'
+      responses:
+        '200':
+          description: Created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/publication_settings:
+    get:
+      tags: [Publications]
+      summary: Get publication settings (boolean toggles + a few non-bool values)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationSettings'
+    put:
+      tags: [Publications]
+      summary: Update a publication setting (single boolean toggle per call)
+      description: |
+        Body shape: `{<setting_name>: <bool>}`. Confirmed key:
+        `high_res_recording_beta`. Many other toggles exist (subscribe
+        prompts, auto-clips, archive/about/notes-tab visibility, comments,
+        automatic moderation, AI training opt-out, cross-posting, listing,
+        approximate subscriber count, etc.). Field names match the form
+        field names visible in the DOM.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicationSettings'
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/publication/sections:
+    get:
+      tags: [Publications]
+      summary: List publication sections (multi-section pubs)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Section'
+
+  /api/v1/publication/logo:
+    get:
+      tags: [Publications]
+      summary: Get logo metadata
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/bestseller_tier:
+    get:
+      tags: [Publications]
+      summary: Get the Substack Bestseller badge tier
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/publication_tags:
+    get:
+      tags: [Tags]
+      summary: Publication-level discovery category tags
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryTag'
+
+  /api/v1/publication/post-tag:
+    get:
+      tags: [Tags]
+      summary: List per-post tags configured for the publication
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PostTag'
+    post:
+      tags: [Tags]
+      summary: Create a new per-post tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostTag'
+
+  /api/v1/publication/post-tag/{id}:
+    delete:
+      tags: [Tags]
+      summary: Delete a per-post tag
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/post-tag/settings:
+    get:
+      tags: [Tags]
+      summary: Tags with navigation-bar settings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PostTagWithNav'
+
+  /api/v1/post/{post_id}/tag/{tag_id}:
+    post:
+      tags: [Tags, Posts]
+      summary: Attach a tag to a post
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: tag_id
+          in: path
+          required: true
+          description: UUID (from `POST /publication/post-tag`)
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Tags, Posts]
+      summary: Detach a tag from a post (without deleting the tag)
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: tag_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/users:
+    get:
+      tags: [Publications]
+      summary: Users with roles on this publication
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication_user:
+    get:
+      tags: [Publications]
+      summary: Per-user publication roles + bios (with underscore — distinct from /publication/users)
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication_user_invite:
+    get:
+      tags: [Publications]
+      summary: Pending co-author invites (not /publication/invites — that 403s)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+
+  /api/v1/publication/invite:
+    post:
+      tags: [Publications]
+      summary: Invite a co-author
+      description: ⚠️ Sends a real email. Don't probe with an address you don't own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+      responses:
+        '200': { description: OK }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/publication_pages:
+    get:
+      tags: [Publications]
+      summary: Custom publication pages (about, archive, etc.)
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication_export:
+    get:
+      tags: [Publications, Subscribers]
+      summary: Subscriber CSV export jobs
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/subdomain/can_alias:
+    get:
+      tags: [Publications]
+      summary: Whether the pub can be aliased to a different subdomain
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_alias: { type: boolean }
+
+  /api/v1/publication/transfer_ownership/status:
+    get:
+      tags: [Publications]
+      summary: In-flight ownership-transfer state
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/verify_status:
+    get:
+      tags: [Publications]
+      summary: Publication-verification (blue-check equivalent) status
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication_launch_checklist:
+    get:
+      tags: [Publications]
+      summary: Onboarding checklist state
+      description: about_page completed, first_post sent, checklist_complete, etc.
+      responses:
+        '200': { description: OK }
+
+  /api/v1/drafts:
+    get:
+      tags: [Drafts]
+      summary: List drafts (use as "do I have edit access" probe)
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Draft'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Drafts]
+      summary: Create a draft
+      description: |
+        `draft_bylines` is **required** (not optional as some docs claim).
+        Get the IDs from `/user/profile/self` — `id` is your user id,
+        `publicationUserId` is `publicationUsers[N].id` for the pub.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftCreate'
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Draft'
+
+  /api/v1/drafts/{id}:
+    get:
+      tags: [Drafts]
+      summary: Get a single draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Draft'
+    put:
+      tags: [Drafts]
+      summary: Update a draft in place
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftCreate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Draft'
+    delete:
+      tags: [Drafts]
+      summary: Delete a draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+        '404': { description: Already deleted }
+
+  /api/v1/drafts/{id}/publish:
+    put:
+      tags: [Drafts]
+      summary: Publish a draft (irreversible if send=true)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishRequest'
+      responses:
+        '200':
+          description: Published post (with `slug`)
+
+  /api/v1/drafts/{id}/prepublish:
+    get:
+      tags: [Drafts]
+      summary: Pre-flight check before publishing
+      description: |
+        **Note:** The verb is **GET**, not PUT/POST as some older clients say.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: publish_date
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    type: array
+                    items: { type: object }
+                  suggestions:
+                    type: array
+                    items: { type: object }
+
+  /api/v1/drafts/{id}/scheduled_release:
+    get:
+      tags: [Drafts]
+      summary: Current schedule for a draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK (empty array if not scheduled)
+    post:
+      tags: [Drafts]
+      summary: Schedule a draft
+      description: |
+        ⚠️ The field name is **`trigger_at`** — NOT `post_date`,
+        `publish_date`, or `scheduled_at`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduledRelease'
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Drafts]
+      summary: Unschedule a draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Returns array of cancelled schedule IDs
+
+  /api/v1/posts:
+    get:
+      tags: [Posts]
+      summary: Public posts listing
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/post_management/published:
+    get:
+      tags: [Posts]
+      summary: Admin view — published posts
+      parameters:
+        - $ref: '#/components/parameters/PaginationOffset'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - name: order_by
+          in: query
+          schema: { type: string, enum: [post_date] }
+        - $ref: '#/components/parameters/OrderDirection'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostManagementList'
+
+  /api/v1/post_management/scheduled:
+    get:
+      tags: [Posts]
+      summary: Admin view — scheduled posts
+      description: |
+        `order_by` only accepts `draft_updated_at` (NOT `post_date`).
+      parameters:
+        - $ref: '#/components/parameters/PaginationOffset'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - name: order_by
+          in: query
+          required: true
+          schema: { type: string, enum: [draft_updated_at] }
+        - $ref: '#/components/parameters/OrderDirection'
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/post_management/drafts:
+    get:
+      tags: [Drafts]
+      summary: Admin view — drafts (paginated)
+      parameters:
+        - $ref: '#/components/parameters/PaginationOffset'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - name: order_by
+          in: query
+          schema: { type: string, enum: [draft_updated_at] }
+        - $ref: '#/components/parameters/OrderDirection'
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/post_management/counts:
+    get:
+      tags: [Posts]
+      summary: Counts for published, drafts, scheduled
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostManagementCounts'
+
+  /api/v1/post_management/live_stream_drafts:
+    get:
+      tags: [Drafts, LiveStreams]
+      summary: Live-stream draft list
+      responses:
+        '200': { description: OK }
+
+  /api/v1/post_management/detail/{post_id}:
+    get:
+      tags: [Posts, Stats]
+      summary: Per-post detail with full `stats` (31-field engagement payload)
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: offset
+          in: query
+          required: true
+          schema: { type: integer, enum: [0] }
+        - name: limit
+          in: query
+          required: true
+          schema: { type: integer, enum: [1] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Post'
+                        - type: object
+                          properties:
+                            stats:
+                              $ref: '#/components/schemas/PostStats'
+                  total: { type: integer, enum: [1] }
+
+  /api/v1/posts/by-id/{post_id}:
+    get:
+      tags: [Posts]
+      summary: Single post with full content (use the pub's actual host)
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  post:
+                    $ref: '#/components/schemas/Post'
+
+  /api/v1/post/{post_id}/theme:
+    get:
+      tags: [Posts]
+      summary: Post-level theme override
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/post/{post_id}/comments:
+    get:
+      tags: [Comments]
+      summary: List reader comments on a post
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Comment'
+                  automod_hidden_comments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Comment'
+
+  /api/v1/post/{post_id}/comment:
+    post:
+      tags: [Comments]
+      summary: Create a reader comment on a post
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+
+  /api/v1/post/{post_id}/reaction:
+    post:
+      tags: [Reactions]
+      summary: React to a post
+      description: |
+        The `reaction` field is the **literal emoji character** (e.g. `❤`),
+        NOT the named reaction string. Idempotent per-user.
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReactionRequest'
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Reactions]
+      summary: Remove your reaction from a post
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Empty body `{}`.
+      responses:
+        '200': { description: OK }
+
+  /api/v1/comment/{comment_id}:
+    delete:
+      tags: [Comments, Notes]
+      summary: Delete a comment or note
+      description: |
+        Same endpoint deletes both reader comments and Notes. The
+        `{comment_id}` is the numeric id (without the `c-` prefix from
+        `entity_key`).
+      parameters:
+        - name: comment_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/comment/feed:
+    post:
+      tags: [Notes]
+      summary: Create a Note (Substack's microblog surface — endpoint name uses "comment")
+      servers:
+        - url: https://substack.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteCreate'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/feed/drafts:
+    get:
+      tags: [Notes]
+      summary: List saved Notes drafts for the publication
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/feed/following:
+    get:
+      tags: [Notes]
+      summary: List of user IDs the cookie holder follows
+      servers:
+        - url: https://substack.com
+      description: |
+        Despite the `/feed` prefix, this is the **following list**, not a
+        content feed. First entry is always the user's own id.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: integer }
+
+  /api/v1/reader/feed:
+    get:
+      tags: [ReaderFeed, Notes]
+      summary: Personalized Notes home feed
+      servers:
+        - url: https://substack.com
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxItems'
+
+  /api/v1/reader/feed/tabs:
+    get:
+      tags: [ReaderFeed]
+      summary: Tabs in the Notes home feed
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReaderFeedTabs'
+
+  /api/v1/reader/feed/profile/{user_id}:
+    get:
+      tags: [Notes]
+      summary: A user's published Notes (chronological)
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/reader/feed/{entity_key}/seen:
+    post:
+      tags: [ReaderFeed]
+      summary: Mark a feed item as seen
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: entity_key
+          in: path
+          required: true
+          description: '`c-{comment_id}` for notes/comments, `p-{post_id}` for posts.'
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/inbox/top:
+    get:
+      tags: [ReaderFeed]
+      summary: Reader inbox (posts from subscribed publications)
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: inboxType
+          in: query
+          schema: { type: string, enum: [inbox] }
+        - name: surface
+          in: query
+          schema:
+            type: string
+            enum: [inbox_all, inbox_listen, inbox_paid, inbox_saved, inbox_history]
+        - $ref: '#/components/parameters/PaginationLimit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Post'
+
+  /api/v1/inbox/seen:
+    post:
+      tags: [ReaderFeed]
+      summary: Mark all inbox items as seen
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+
+  /api/v1/archive:
+    get:
+      tags: [Posts]
+      summary: Publication archive (all published posts, unpaginated)
+      responses:
+        '200': { description: OK }
+
+  /api/v1/subscriber-stats:
+    post:
+      tags: [Subscribers]
+      summary: List subscribers (filtered, sorted, paginated)
+      description: |
+        ⚠️ **POST for a read.** Substack uses POST for endpoints that take
+        rich filter objects in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriberStatsRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriberStatsResponse'
+
+  /api/v1/subscriber/add:
+    post:
+      tags: [Subscribers]
+      summary: Add a subscriber
+      description: |
+        Empty body returns `{}` (200) — endpoint exists but silently ignores
+        empty input. The web UI's "Add subscriber" form sends
+        `{email, name?, tier?}`. Use with care: adds a real subscriber.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                tier: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/subscriber/{subscription_id}:
+    delete:
+      tags: [Subscribers]
+      summary: Remove a subscriber
+      parameters:
+        - name: subscription_id
+          in: path
+          required: true
+          description: The `subscription_id` from `POST /subscriber-stats`.
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+        '400':
+          description: '`{ "error": "Subscription not found" }` for unknown id'
+
+  /api/v1/import:
+    get:
+      tags: [Subscribers]
+      summary: Subscriber import job status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  is_added: { type: integer }
+                  is_skipped: { type: integer }
+                  is_limited: { type: integer }
+                  passImportVerification: { type: boolean }
+
+  /api/v1/recommendations:
+    put:
+      tags: [Recommendations]
+      summary: Add a recommendation (idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationCreate'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/recommendations/:
+    delete:
+      tags: [Recommendations]
+      summary: Remove a recommendation
+      description: |
+        ⚠️ **Note the trailing slash** in the path (`/recommendations/` not
+        `/recommendations`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationDelete'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/recommendations/from/{publication_id}:
+    get:
+      tags: [Recommendations]
+      summary: Recommendations FROM this pub
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: '#/components/parameters/PaginationOffset'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - name: paginate
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Recommendation'
+
+  /api/v1/recommendations/from/{from_pub_id}/to/{to_pub_id}:
+    get:
+      tags: [Recommendations]
+      summary: Existence + metadata for a specific recommendation edge
+      parameters:
+        - name: from_pub_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: to_pub_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/recommendations/{publication_id}/suggested:
+    get:
+      tags: [Recommendations]
+      summary: ML-suggested pubs to recommend
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/recommendations/exist:
+    get:
+      tags: [Recommendations]
+      summary: Quick "are recommendations enabled?" probe
+      responses:
+        '200': { description: OK }
+
+  /api/v1/recommendations/stats/to:
+    get:
+      tags: [Recommendations]
+      summary: Incoming recommendations with subscriber-acquisition stats
+      parameters:
+        - $ref: '#/components/parameters/PaginationOffset'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - name: order_by
+          in: query
+          required: true
+          schema: { type: string, enum: [xp_signups] }
+        - $ref: '#/components/parameters/OrderDirection'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/search:
+    get:
+      tags: [Recommendations, Search]
+      summary: Search publications by name/handle (used by Add Recommendation picker)
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/messages/inbox:
+    get:
+      tags: [Messages]
+      summary: DMs inbox
+      servers:
+        - url: https://substack.com
+      responses:
+        '200': { description: OK }
+
+  /api/v1/messages/unread-count:
+    get:
+      tags: [Messages]
+      summary: Combined badge counts (DMs, pending invites, pub chat)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unreadCount: { type: integer }
+                  pendingInviteCount: { type: integer }
+                  pendingInviteUnreadCount: { type: integer }
+                  newPendingInviteUnreadCount: { type: integer }
+                  pubChatUnreadCount: { type: integer }
+
+  /api/v1/publish-dashboard/summary:
+    get:
+      tags: [Stats]
+      summary: All-time publication summary stats
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishDashboardSummary'
+
+  /api/v1/publish-dashboard/summary-v2:
+    get:
+      tags: [Stats]
+      summary: Start/end snapshot stats for a time window
+      parameters:
+        - name: range
+          in: query
+          required: true
+          description: Day count (verified 7, 30, 365).
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishDashboardSummaryV2'
+
+  /api/v1/publication/stats/emails/timeseries:
+    get:
+      tags: [Stats]
+      summary: Daily email-send count timeseries (~1 year)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailTimeseries'
+
+  /api/v1/publication/stats/network_attribution:
+    get:
+      tags: [Stats]
+      summary: Subscriber attribution by source
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkAttribution'
+
+  /api/v1/publication/stats/payment_pledges:
+    get:
+      tags: [Stats]
+      summary: Per-user paid-pledge breakdown
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/stats/can-delete-archive:
+    get:
+      tags: [Stats]
+      summary: Admin-only permission flag for deleting archived stats
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/stats/growth/sources:
+    get:
+      tags: [Stats, Growth]
+      summary: Subscriber/visitor source breakdown for a date window
+      parameters:
+        - name: from_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: order_by
+          in: query
+          schema: { type: string, enum: [users] }
+        - $ref: '#/components/parameters/OrderDirection'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/stats/growth/events:
+    get:
+      tags: [Stats, Growth]
+      summary: Growth-events timeline
+      parameters:
+        - name: from_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/stats/growth/partial-timeseries:
+    post:
+      tags: [Stats, Growth]
+      summary: Partial chart timeseries updates (pan/zoom)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Body shape TBD.
+      responses:
+        '200': { description: OK }
+
+  /api/v1/grow/suggestion:
+    get:
+      tags: [Growth]
+      summary: Server-side growth tip for the dashboard
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  suggestion:
+                    type: object
+                    properties:
+                      header: { type: string }
+                      body: { type: string }
+
+  /api/v1/community/publications/{publication_id}/publication_threads_settings:
+    post:
+      tags: [Chat]
+      summary: Enable/disable + configure Substack Chat ("threads") for a pub
+      description: |
+        Substack Chat is internally called "threads". Same endpoint enables
+        and disables — flip `threads_v2_enabled`.
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreadsSettings'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/publication/{publication_id}/publication_threads_settings:
+    post:
+      tags: [Chat]
+      summary: Alias for the chat settings endpoint (older path)
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreadsSettings'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/community/publications/{publication_id}/posts:
+    get:
+      tags: [Chat]
+      summary: List threads for a publication
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  threads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        communityPost:
+                          $ref: '#/components/schemas/Thread'
+    post:
+      tags: [Chat]
+      summary: Send a thread message
+      description: |
+        ⚠️ **`id` is client-generated UUID** (Substack uses it as the
+        canonical thread id; not assigned server-side). Use for idempotency.
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreadCreate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+
+  /api/v1/community/publications/{publication_id}/posts/scheduled:
+    get:
+      tags: [Chat]
+      summary: List scheduled threads
+      parameters:
+        - name: publication_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/community/posts/{thread_id}:
+    delete:
+      tags: [Chat]
+      summary: Delete a thread (soft delete)
+      description: |
+        ⚠️ Path is `/community/posts/{id}`, NOT
+        `/community/publications/{pub}/posts/{id}` (that 404s). Body is
+        cleared but the record persists.
+      parameters:
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/image:
+    post:
+      tags: [Media]
+      summary: Upload an image
+      description: |
+        ⚠️ Takes a **base64 data URI as JSON**, NOT a multipart upload.
+        Multipart returns 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageUploadRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageUploadResponse'
+
+  /api/v1/audio/upload:
+    post:
+      tags: [Media]
+      summary: Initiate an audio/podcast upload (returns S3 presigned URL)
+      description: |
+        First step of a 4-step S3 presigned multipart upload:
+        1. POST here → returns `media_upload_id` (UUID) and S3 presigned PUT URL
+           to `https://substack-video.s3-accelerate.amazonaws.com/video_upload/post/{post_id}/{upload_id}/original`.
+           (Yes, `substack-video` — unified media bucket.)
+        2. PUT raw bytes to that S3 URL. Save the ETag header.
+        3. POST to `/audio/upload/{upload_id}/transcode` with multipart info.
+        4. Poll `GET /audio/upload/{upload_id}` for status.
+
+        ⚠️ Substack rejects very-short audio (~<1s real content) with a
+        generic upload error after transcode.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioUploadInit'
+
+  /api/v1/audio/upload/{upload_id}:
+    get:
+      tags: [Media]
+      summary: Poll upload + transcode status
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/audio/upload/{upload_id}/transcode:
+    post:
+      tags: [Media]
+      summary: Complete multipart upload and start transcode
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AudioTranscodeRequest'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/stripe/account:
+    get:
+      tags: [Subscribers]
+      summary: Stripe Connect account status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeAccountStatus'
+
+  /api/v1/pledges/plans:
+    get:
+      tags: [Subscribers]
+      summary: Configured paid-tier list (cents)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PledgePlans'
+
+  /api/v1/pledges/plans/summary:
+    get:
+      tags: [Subscribers]
+      summary: Pledge-plan summary stats
+      responses:
+        '200': { description: OK }
+
+  /api/v1/live_streams:
+    get:
+      tags: [LiveStreams]
+      summary: List live streams
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [scheduled, live, ended] }
+        - name: stream_type
+          in: query
+          schema: { type: string, enum: [rtmp_only] }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/live_stream/eligible_hosts:
+    get:
+      tags: [LiveStreams]
+      summary: Users who can host a live stream
+      responses:
+        '200': { description: OK }
+
+  /api/v1/video/youtube/check-authorization:
+    get:
+      tags: [CrossPosting]
+      summary: YouTube cross-post auth status
+      responses:
+        '200': { description: OK }
+
+  /api/v1/video/youtube/show-banner:
+    get:
+      tags: [CrossPosting]
+      summary: Whether to show the "connect YouTube" banner in the editor
+      responses:
+        '200': { description: OK }
+
+  /api/v1/video/linkedin/check-authorization:
+    get:
+      tags: [CrossPosting]
+      summary: LinkedIn cross-post auth status
+      responses:
+        '200': { description: OK }
+
+  /api/v1/video/linkedin/{post_id}/auto-upload-state:
+    get:
+      tags: [CrossPosting, Posts]
+      summary: LinkedIn auto-cross-post state for a specific post
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/threads/reactions:
+    get:
+      tags: [Reactions]
+      summary: Catalog of reaction emojis for Notes/comments
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadsReactions'
+
+  /api/v1/comment/moderation/delete_reasons:
+    get:
+      tags: [Notifications, Comments]
+      summary: Enum of moderator-delete reasons
+      servers:
+        - url: https://substack.com
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteReasons'
+
+  /api/v1/notification_settings/post/{post_id}/mute:
+    get:
+      tags: [Notifications]
+      summary: Per-post mute state for the cookie holder
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/user-setting:
+    put:
+      tags: [UserSettings]
+      summary: Generic per-user key/value setter
+      description: |
+        Body shape: `{type, value_<typed>}`. Verified type:
+        `newest_seen_chat_item_published_at` (last-seen marker for chat
+        badge clearing).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSettingUpdate'
+      responses:
+        '200': { description: OK }
+
+  /api/v1/user/writer_referrals/code:
+    put:
+      tags: [UserSettings]
+      summary: Get/create writer referral code (idempotent)
+      responses:
+        '200': { description: OK }
+
+  /api/v1/search/explore/web:
+    get:
+      tags: [Search]
+      summary: Global search across publications, posts, and Notes
+      servers:
+        - url: https://substack.com
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /api/v1/search-modules:
+    get:
+      tags: [Search]
+      summary: Discovery surface content (trending topics + per-category lists)
+      servers:
+        - url: https://substack.com
+      responses:
+        '200': { description: OK }
+
+  /api/v1/firehose/batch:
+    post:
+      tags: [Telemetry]
+      summary: Client-side analytics batch
+      description: |
+        ⚠️ Telemetry. Documented to identify in captures only — **do not
+        call manually.**
+      responses:
+        '204':
+          description: No Content
