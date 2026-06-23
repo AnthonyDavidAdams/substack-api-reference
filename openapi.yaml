@@ -837,15 +837,104 @@ components:
 
     ImageUploadResponse:
       type: object
+      description: |
+        Verified end-to-end against a live upload (round 15). The error mode
+        for mismatched field names is silent: client code reads missing
+        fields as undefined, falls back to 0, embeds a captionedImage block
+        with zero dimensions, and Substack renders an empty placeholder.
       properties:
         id: { type: integer }
         url:
           type: string
-          description: S3-hosted CDN URL safe to use in drafts/posts.
-        contentType: { type: string }
-        bytes_required: { type: integer }
-        width: { type: integer }
-        height: { type: integer }
+          description: |
+            URL on `substack-post-media.s3.amazonaws.com` (not
+            `substackcdn.com`). Foreign image URLs are silently dropped by
+            the editor's render pipeline — upload via this endpoint first.
+          example: https://substack-post-media.s3.amazonaws.com/public/images/6d5c5adf-5fc3-4c6b-a455-fb5136830ca5_10x10.png
+        contentType:
+          type: string
+          example: image/png
+        bytes:
+          type: integer
+          description: File size in bytes. **NOT** `bytes_required`.
+        imageWidth:
+          type: integer
+          description: Pixel width. **NOT** `width`.
+        imageHeight:
+          type: integer
+          description: Pixel height. **NOT** `height`.
+
+    CaptionedImageBlock:
+      type: object
+      description: |
+        ProseMirror block for embedding an uploaded image in `draft_body`.
+        The shape is **nested**: `captionedImage` wraps an `image2` child
+        (yes, `image2` — not `image`), plus an optional `caption` child.
+
+        A bare `{type:"image2", attrs}` or `{type:"image", attrs}` block
+        gets silently stripped on save. Only `captionedImage > image2`
+        survives.
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          enum: [captionedImage]
+        content:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/Image2Node'
+              - $ref: '#/components/schemas/CaptionNode'
+
+    Image2Node:
+      type: object
+      description: |
+        Inner image node within `captionedImage`. 14 attrs — most can be
+        null/false/0, but **width, height, and bytes are critical**;
+        zeroes cause Substack to render the image as an empty placeholder.
+        Source them from the `/api/v1/image` upload response
+        (`imageWidth`, `imageHeight`, `bytes`).
+      required: [type, attrs]
+      properties:
+        type:
+          type: string
+          enum: [image2]
+        attrs:
+          type: object
+          required: [src, width, height, bytes, type]
+          properties:
+            src:
+              type: string
+              description: URL from `/api/v1/image` response.
+            srcNoWatermark: { type: string, nullable: true }
+            fullscreen: { type: string, nullable: true }
+            imageSize: { type: string, nullable: true }
+            width: { type: integer }
+            height: { type: integer }
+            resizeWidth: { type: integer, nullable: true }
+            bytes: { type: integer }
+            alt: { type: string, nullable: true }
+            title: { type: string, nullable: true }
+            type:
+              type: string
+              description: MIME type, e.g. `image/png`.
+            href: { type: string, nullable: true }
+            belowTheFold: { type: boolean }
+            topImage: { type: boolean }
+            internalRedirect: { type: string, nullable: true }
+
+    CaptionNode:
+      type: object
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          enum: [caption]
+        content:
+          type: array
+          items:
+            type: object
+            description: 'Text node — `{type: "text", text: "...", marks?: [...]}`.'
 
     AudioUploadInit:
       type: object

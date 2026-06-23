@@ -1330,12 +1330,85 @@ sent, etc.).
 ### ✅ `POST /api/v1/image`
 **Host:** `{subdomain}.substack.com`
 **Body (JSON):** `{ "image": "data:image/png;base64,<base64-encoded-bytes>" }`
-**Returns:** `{ id, url, contentType, bytes_required, width, height, ... }`
-where `url` is an S3-hosted CDN URL safe to use in drafts/posts.
+**Returns:**
+```json
+{
+  "id": 285574576,
+  "url": "https://substack-post-media.s3.amazonaws.com/public/images/6d5c5adf-5fc3-4c6b-a455-fb5136830ca5_10x10.png",
+  "contentType": "image/png",
+  "bytes": 75,
+  "imageWidth": 10,
+  "imageHeight": 10
+}
+```
+
+**Important — exact field names** (verified against a live upload, round 15):
+- `bytes` — file size in bytes. NOT `bytes_required`.
+- `imageWidth` / `imageHeight` — pixel dimensions. NOT `width` / `height`.
+
+Some references (including earlier versions of this one) had the wrong
+field names. The error mode is silent: client code reads the missing
+fields as `undefined`, falls back to `0`, and embeds an image block with
+zero dimensions — which Substack renders as an empty placeholder ("my
+image didn't show up" with no error in the console). Use these exact
+names.
+
+**Bucket:** the returned `url` is on `substack-post-media.s3.amazonaws.com`,
+under the path `/public/images/<uuid>_<W>x<H>.<ext>`. Foreign URLs (e.g.
+your own CDN) are silently dropped by the editor's render pipeline — you
+MUST upload via this endpoint first if you want the image to render.
 
 **Important:** This endpoint takes a **base64 data URI as JSON**, NOT a
 multipart upload. Multipart returns 400 `"Invalid value"`. Some older clients
 have this wrong.
+
+### ✅ Image embed: the `captionedImage` ProseMirror block
+
+To embed an uploaded image in a draft's `draft_body`, use Substack's
+nested `captionedImage` block. The outer block contains an `image2` child
+(yes, `image2` — not `image`), plus an optional `caption` child:
+
+```json
+{
+  "type": "captionedImage",
+  "content": [
+    {
+      "type": "image2",
+      "attrs": {
+        "src": "<url from /api/v1/image response>",
+        "srcNoWatermark": null,
+        "fullscreen": null,
+        "imageSize": null,
+        "width": 10,
+        "height": 10,
+        "resizeWidth": null,
+        "bytes": 75,
+        "alt": null,
+        "title": null,
+        "type": "image/png",
+        "href": null,
+        "belowTheFold": false,
+        "topImage": false,
+        "internalRedirect": null
+      }
+    },
+    {
+      "type": "caption",
+      "content": [{ "type": "text", "text": "Caption text here" }]
+    }
+  ]
+}
+```
+
+**The 14 `image2.attrs` fields** are all part of Substack's editor schema.
+Most can be `null`/`false`/`0`, but **`width`, `height`, and `bytes` are
+critical** — zeroes cause the editor to render the image as an empty
+placeholder. Source them from the upload response (`imageWidth`,
+`imageHeight`, `bytes`).
+
+The `image2` node by itself (without the `captionedImage` wrapper) gets
+silently stripped on save. So does a plain `{type:"image", attrs:{src}}`
+node — that's a different schema that Substack's parser doesn't accept.
 
 ---
 
