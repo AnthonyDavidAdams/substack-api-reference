@@ -1,0 +1,76 @@
+# Substack API Reference (Unofficial)
+
+A practical, verified reference for Substack's undocumented internal API. Every
+endpoint here has been tested against the live API. Designed for humans AND
+for AI agents (see [`SKILL.md`](SKILL.md)).
+
+> ⚠️ **Unofficial.** Substack doesn't publish or support this API. Endpoints
+> can change without notice. Treat this as a working notebook, not a contract.
+
+## Why this exists
+
+The Substack web app speaks to a JSON API at `https://substack.com/api/v1/*` and
+per-publication subdomains at `https://<sub>.substack.com/api/v1/*`. The web
+app uses it for everything: reading posts, creating drafts, publishing, managing
+subscribers. With a session cookie, you can drive the same API from any script.
+
+Existing community work covers parts of this surface:
+
+- [NHagar/substack_api](https://github.com/NHagar/substack_api) — Python, read-focused
+- [ma2za/python-substack](https://github.com/ma2za/python-substack) — Python, full CRUD
+- [jakub-k-slys/substack-api](https://github.com/jakub-k-slys/substack-api) — TypeScript (archived)
+- [JPres-Projects/Substack-API](https://github.com/JPres-Projects/Substack-API) — Python, draft + publish
+
+This repo aims to be the **canonical endpoint reference** these clients converge
+on. Submit a PR with anything new you find.
+
+## Quick start
+
+```bash
+# 1. Get your session cookie (see AUTH.md for browser-extension and DevTools paths)
+COOKIE='s%3A...your.connect.sid.value...'
+
+# 2. Verify it's good — returns your profile + every publication you can edit
+curl -H "Cookie: connect.sid=$COOKIE; substack.sid=$COOKIE" \
+  https://substack.com/api/v1/user/profile/self | jq .handle
+
+# 3. Create a draft on a publication you admin
+curl -X POST \
+  -H "Cookie: connect.sid=$COOKIE; substack.sid=$COOKIE" \
+  -H "Content-Type: application/json" \
+  -d '{"draft_title":"Hello","draft_subtitle":"From the API","draft_body":"<p>Hi.</p>","type":"newsletter"}' \
+  https://yourname.substack.com/api/v1/drafts
+```
+
+## Contents
+
+- [`AUTH.md`](AUTH.md) — getting the cookie, cookie format, rotation
+- [`ENDPOINTS.md`](ENDPOINTS.md) — every verified endpoint with params + samples
+- [`SKILL.md`](SKILL.md) — Claude Agent SDK skill manifest
+- [`examples/curl/`](examples/curl) — drop-in curl scripts
+- [`examples/typescript/`](examples/typescript) — minimal typed client
+
+## Verified vs. inferred
+
+Each endpoint in [`ENDPOINTS.md`](ENDPOINTS.md) is marked:
+
+- ✅ **Verified** — I personally tested it with curl
+- 🟡 **Reported** — documented by another client / blog post, not independently re-tested
+- ❓ **Inferred** — pattern-matched from related endpoints, no confirmation
+
+PRs welcome to upgrade ❓ → 🟡 → ✅.
+
+## Status
+
+This reference covers the endpoints needed for:
+- ✅ Authentication and account discovery
+- ✅ Listing user's publications (with role)
+- ✅ Drafts: create, update, delete, publish
+- ✅ Reading published posts
+- 🟡 Subscribers / contacts
+- 🟡 Notes (Substack's Twitter-like surface)
+- ❓ Analytics / stats
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
