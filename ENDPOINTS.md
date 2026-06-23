@@ -121,6 +121,33 @@ The session cookie is set by that handler. Not currently mapped.
 
 ---
 
+## User settings
+
+### ✅ `PUT /api/v1/user-setting`
+**Host:** `substack.com` or `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "type": "newest_seen_chat_item_published_at",
+  "value_datetime": "2026-06-23T18:20:44.638Z"
+}
+```
+Generic per-user key/value setter, similar pattern to the publication
+`POST /settings` but for user-level state. Field naming:
+- `type` — string, the setting key
+- `value_<type>` — the typed value field (`value_datetime`,
+  `value_string`, `value_bool`, etc., based on the setting's expected
+  shape)
+
+Verified `type` values:
+- `newest_seen_chat_item_published_at` — last-seen marker for chat
+  badge clearing
+
+Other types likely exist — capture from any UI action that updates a
+user preference.
+
+---
+
 ## Drafts (publication-scoped)
 
 All draft endpoints require admin/editor role on the pub. Returns
@@ -659,6 +686,28 @@ the Notes section already documented this path on the account host).
 **Returns:** `200 {}` on success. Same endpoint deletes both reader
 comments and Notes.
 
+### ✅ `POST /api/v1/post/{post_id}/reaction`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{ "reaction": "❤", "surface": "reader" }
+```
+**Fields:**
+- `reaction` — the **literal emoji character** (e.g. `"❤"`, `"👍"`).
+  Not the named reaction string (`thumbs_up`). The Notes/threads
+  reaction catalog (`GET /threads/reactions`) returns named strings,
+  but the wire format for post reactions is the actual unicode.
+- `surface` — verified value: `"reader"`. Other surfaces likely
+  include `"editor"`, `"feed"`, etc. (telemetry-flavored).
+
+**Returns:** `200`. The post's `reaction_count` increments. Idempotent
+per-user.
+
+### ✅ `DELETE /api/v1/post/{post_id}/reaction`
+**Host:** `{subdomain}.substack.com`
+**Body:** Empty (`{}`). Removes the cookie holder's reaction from the
+post.
+
 ---
 
 ## Recommendations (cross-publication promotion)
@@ -1077,6 +1126,13 @@ settings UI and toggling fields):
 - `hero_text` — string (publication short description)
 - `language` — string (ISO 639-1 code; `en`, `es`, etc. — Substack
   reloads the UI immediately to render in the new language)
+- `welcome_email_content` — **stringified ProseMirror doc** (TipTap
+  JSON encoded as a single string, not a nested object). The doc
+  shape is the standard `{type:"doc", content:[...]}`. Captured via
+  the Welcome Email editor at `/publish/settings/edit?bodyField=welcome_email_content&titleField=welcome_email_subject`.
+- `welcome_email_subject` — string (per the URL query of the welcome
+  email editor; not directly captured but the field naming pattern is
+  consistent with `welcome_email_content`)
 
 With empty body returns `{"error":"No valid publication parameters provided"}`.
 
@@ -1371,11 +1427,56 @@ distinct from Notes (`/comment/feed`) and from DMs (`/messages/inbox`).
 just flip `threads_v2_enabled`. **The publication shows "Start your
 subscriber chat" UI when disabled and a thread list when enabled.**
 
-### ❓ Send a thread message
-Not yet mapped. The web app likely uses
-`POST /api/v1/comment/feed` (the Notes endpoint) with a different
-`context` field, or `POST /publication/{pub_id}/threads`. Capture the
-"Start a new thread" + send flow to confirm.
+### ✅ `POST /api/v1/community/publications/{publication_id}/posts`
+**Host:** `{subdomain}.substack.com`
+**Body:**
+```json
+{
+  "id": "aa85fa7d-fe8f-43d3-a692-54096ca94752",
+  "body": "thread message text",
+  "media_urls": [],
+  "audience": "all_subscribers",
+  "type": "media",
+  "send_email": false,
+  "send_push": true,
+  "link_url": null
+}
+```
+**Fields:**
+- `id` — **client-generated UUID** (used for idempotency; the server
+  uses this as the canonical thread id, not assigned server-side).
+- `body` — the thread message body (plain text or ProseMirror — needs
+  more testing for rich content).
+- `media_urls` — array of attached media URLs (empty for text-only).
+- `audience` — verified: `"all_subscribers"`. The Substack admin UI
+  toggle would also produce `"paid_subscribers"`, `"founding_members"`.
+- `type` — verified: `"media"`. Probably also `"text"`, `"video"`,
+  `"link"`.
+- `send_email` — bool. The "Send as email" checkbox in the thread
+  composer.
+- `send_push` — bool. Whether subscribers get a push notification.
+- `link_url` — string|null for embedded link previews.
+
+**Returns:** Created community-post (thread) object.
+
+### ✅ `DELETE /api/v1/community/posts/{thread_id}`
+**Host:** `{subdomain}.substack.com` — note the path is
+`/community/posts/{id}`, **NOT** `/community/publications/{pub_id}/posts/{id}`
+(that 404s).
+**Returns:** `200`. Soft-delete — the thread record persists with an
+empty body and `status` set, but it's no longer visible to subscribers.
+
+### ✅ `GET /api/v1/community/publications/{publication_id}/posts`
+**Host:** `{subdomain}.substack.com`
+**Returns:** `{ threads: [{ communityPost: {...} }] }`. List of threads
+for the publication. Each `communityPost` has full thread shape
+including `id` (uuid), `body`, `type`, `audience`, `reaction_count`,
+`comment_count`, `pub_moderation_status`, `is_locked`, `media_assets`.
+
+### ✅ `GET /api/v1/community/publications/{publication_id}/posts/scheduled`
+**Host:** `{subdomain}.substack.com`
+**Returns:** Scheduled threads (drafts with `trigger_at` set, mirror of
+the post-scheduling pattern but on the community/threads surface).
 
 ---
 
@@ -1541,6 +1642,27 @@ Currently unsolved (need targeted captures — pattern-guessing exhausted):
 - **Mobile push token registration** — not mapped.
 
 ### Recently solved (kept as breadcrumbs)
+- **Round 14 (final write-side sweep, 2026-06-23)** — with user consent,
+  ran add-then-revert cycles on the remaining write-side endpoints:
+  (a) Welcome email body via `PUT /publication` with `welcome_email_content`
+  (stringified ProseMirror doc).
+  (b) Post reactions: `POST /post/{id}/reaction` body
+  `{reaction: "❤", surface: "reader"}` — reaction is the **literal
+  emoji character**, not the named string. `DELETE /post/{id}/reaction`
+  empty body for unreact.
+  (c) Substack Chat **send thread**:
+  `POST /community/publications/{pub_id}/posts` with client-generated
+  UUID id, `body`, `audience`, `type`, `send_email`, `send_push`,
+  `link_url`. The **client generates the id** for idempotency.
+  (d) Substack Chat **delete thread** at the surprising path
+  `DELETE /community/posts/{thread_id}` — note: NOT under
+  `/community/publications/{pub_id}/posts/{id}` (that 404s).
+  (e) Generic user setting: `PUT /user-setting` with `{type, value_<typed>}`.
+  Documented the **custom domain UI** path
+  (`/publish/domain/pay`) and noted it's $50 one-time + DNS — won't
+  capture without paying. Probed **comment moderation delete** — the
+  endpoint path differs from `/comment/moderation/delete` (404'd);
+  needs another user's comment to trigger the right UI.
 - **Round 13 (Chrome-extension destructive cycles, 2026-06-23)** —
   with explicit user consent, ran add-then-revert cycles on real
   publication actions to capture write-side bodies that couldn't be
